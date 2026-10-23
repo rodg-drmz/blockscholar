@@ -155,6 +155,10 @@ test('wallet login consumes challenges and restores the same DID', async (t) => 
   assert.equal(secondBody.identity.id, verifiedBody.identity.id);
   assert.equal(secondBody.identity.did, verifiedBody.identity.did);
 
+  const { redirectWithUser } = await import('../app/api/lib/auth-session');
+  const badReturn = redirectWithUser('https://drmz.test', '/\\attacker.example', {id: 'test', name: 'Test', email:'learner@example.edu', provider:'email_link'});
+  assert.equal(new URL(badReturn.headers.get('location')!).origin, 'https://drmz.test');
+
   const magicRoute = await import('../app/api/auth/magic-link/route');
   const magicVerifyRoute = await import('../app/api/auth/magic-link/verify/route');
   const privateReturn = '/learn/blockscholar';

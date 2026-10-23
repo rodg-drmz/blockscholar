@@ -7,7 +7,7 @@ async function walletStep<T>(name:string,work:()=>Promise<T>):Promise<T>{let tim
 const hex=(value:string)=>Array.from(new TextEncoder().encode(value),b=>b.toString(16).padStart(2,'0')).join('');
 export function Access(){
  const [email,setEmail]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState(''),[wallets,setWallets]=useState<string[]>([]),[chain,setChain]=useState('cardano'),[midnight,setMidnight]=useState<string[]>([]),[network,setNetwork]=useState('preview');
- function discover(){setWallets(injectedCardanoWalletKeys());setMidnight(Object.entries((window as any).midnight||{}).filter(([,p]:any)=>typeof p?.connect==='function').map(([id])=>id));}
+ function discover(){setWallets(injectedCardanoWalletKeys().filter(id=>id!=='app'));setMidnight(Object.entries((window as any).midnight||{}).filter(([,p]:any)=>typeof p?.connect==='function').map(([id])=>id));}
  useEffect(()=>{discover();const id=setTimeout(discover,1500);return()=>clearTimeout(id);},[]);
  async function run(work:()=>Promise<void>){if(busy)return;setBusy(true);setError('');setMessage('');try{await work();}catch(e:any){setError(e?.message||e?.info||'The wallet request did not complete. Please retry or use email.');}finally{setBusy(false);}}
  async function connect(id:string){await run(async()=>{

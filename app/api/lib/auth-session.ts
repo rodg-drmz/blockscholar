@@ -276,8 +276,9 @@ export function setUserSession(response: NextResponse, user: DrmzUser): NextResp
 
 export function redirectWithUser(requestUrl: URL | string, returnTo: string, user: DrmzUser): NextResponse {
   const origin = typeof requestUrl === 'string' ? requestUrl : requestUrl.origin;
-  const safePath = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/home';
-  const dest = new URL(safePath, origin);
+  const safePath = returnTo.startsWith('/') && !returnTo.startsWith('//') && !/[\\\u0000-\u001f]/.test(returnTo) ? returnTo : '/learn/blockscholar';
+  const candidate = new URL(safePath, origin);
+  const dest = candidate.origin === new URL(origin).origin ? candidate : new URL('/learn/blockscholar', origin);
   dest.searchParams.set('auth', 'success');
   const response = NextResponse.redirect(dest);
   return setUserSession(response, user);

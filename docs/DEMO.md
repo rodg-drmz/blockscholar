@@ -25,3 +25,12 @@ If testnet liquidity prevents an order or position close, show the real pause me
 - Payout address, X handle, Discord handle: supplied by the owner; not inferred or committed.
 
 The form states 10AM EST Friday October 23, 2026; verify the organizer's intended timezone and submit early. This repository does not submit the form automatically.
+
+## Funding the hosted pilot
+
+Use **Cardano Preprod test ADA only**. Addresses are also reported by the hosted program APIs; Dream Fund displays its bounty address.
+
+- Bounty sponsor: `addr_test1vppcm08v6w9zrea4fvfztahuwtwwjtysvvd6xw62kee550cw6pdy3` — 10 test ADA covers a few 2-test-ADA claims and fees.
+- Practice sponsor: `addr_test1vp99hvu3yqe732hen9djkm8wp2j0j2n9v0ds7slcqpmux3s8pr4ux` — 210 test ADA covers two 104-test-ADA starter grants and fees.
+
+The hosted campaign has fresh records. Using the same email/wallet does not import private DRMZ progress or authorize a new trade. Existing Strike funds remain in their original Strike account and can be linked by proving ownership of that wallet.
