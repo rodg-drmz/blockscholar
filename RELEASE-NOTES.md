@@ -25,4 +25,11 @@ The full Spaces engine, Quorum, Oneirium and academic infrastructure remain in t
 - Added React rendering regression tests for signed-out learners, fresh records, readiness saved without a wallet, and linked accounts awaiting funding checks. All 69 tests and the production build/type validation passed.
 - No authentication, progress storage, deposit, order, or bounty payment logic changed.
 
+## Resume after sign-in — October 23, 2026
+
+- Program navigation now records the selected step in its URL. Wallet sign-in reloads and email sign-in links return to that step instead of the program beginning.
+- New guest preparation attempts retain their answers and submit them for server grading after sign-in. Best scores are preserved; successful transfers are not repeated and are bound to the first signed-in account. No rewards or trading evidence are imported.
+- Older guest results without saved answers remain explicitly browser-only, so those learners can continue Mission without repeating the lessons. A later quiz attempt can save preparation to the account.
+- Added coverage for view restoration, guest-to-account grading, retries, unavailable storage, and account isolation. 76 automated tests pass.
+
 No private DRMZ service was redeployed for this release. Existing local and hosted records remain where they were. This public demo uses fresh progress records.

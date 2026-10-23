@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { BLOCKSCHOLAR, programMilestones, nextProgramStep } from '../../../lib/blockscholar/program.mjs';
 import { curriculum, emptyPractice, practiceReward } from '../../../lib/spaces/learning-practice.mjs';
-import { practiceRequest } from './practice-client.mjs';
+import { practiceRequest, resumeGuestPreparation } from './practice-client.mjs';
 import { PracticeSource, ScenarioExercise } from './practice-exercises.jsx';
 import { StrikeMission, missionRequest } from './strike-mission.jsx';
 import { DreamFund } from './dream-fund.jsx';
@@ -10,8 +10,8 @@ import { ExposureCalculator } from './exposure-calculator.jsx';
 
 const views = [['program', 'Program'], ['learn', 'Learn'], ['practice', 'Strike Training'], ['mission', 'Mission'], ['work', 'My work'], ['fund', 'Dream Fund']];
 const blankNotes = () => ({ learning: '', application: '', artifactUrl: '' });
-/** @param {{initialView?: string, compact?: boolean, signIn?: import('react').ReactNode, onPracticeChange?: (record: any) => void, onSessionChange?: (authenticated: boolean) => void}} props */
-export function BlockscholarProgram({ initialView = 'program', compact = false, signIn = null, onPracticeChange, onSessionChange }) {
+/** @param {{initialView?: string, compact?: boolean, signIn?: import('react').ReactNode, onPracticeChange?: (record: any) => void, onSessionChange?: (authenticated: boolean) => void, onViewChange?: (view: string) => void}} props */
+export function BlockscholarProgram({ initialView = 'program', compact = false, signIn = null, onPracticeChange, onSessionChange, onViewChange }) {
   const [view, setView] = useState(views.some(([id]) => id === initialView) ? initialView : 'program');
   const [missionOpened, setMissionOpened] = useState(['mission','practice'].includes(initialView));
   const [data, setData] = useState(null), [practice, setPractice] = useState(emptyPractice()), [scope, setScope] = useState('');
@@ -20,6 +20,8 @@ export function BlockscholarProgram({ initialView = 'program', compact = false, 
   const fieldId = useId();
   const [reviewPrep, setReviewPrep] = useState(false), [reviewPractice, setReviewPractice] = useState(false), [marketOpen, setMarketOpen] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
+  const [resumeNotice, setResumeNotice] = useState('');
+  useEffect(() => { onViewChange?.(view); }, [view, onViewChange]);
   const panelStart = useRef(null), navigating = useRef(false);
   const owner = useRef(undefined), pending = useRef(false), alive = useRef(true);
   const choose = next => { if (['mission','practice'].includes(next)) setMissionOpened(true); navigating.current = true; setView(next); setError(''); };
@@ -33,12 +35,12 @@ export function BlockscholarProgram({ initialView = 'program', compact = false, 
     try {
       const response = await fetch('/api/learn/blockscholar', { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(20_000) });
       const next = await response.json(); if (!response.ok) throw new Error(next.error);
-      const saved = next.practice ? { state: next.practice, scope: 'account' } : !next.mission.authenticated ? await practiceRequest() : { state: emptyPractice(), scope: 'account' };
+      const saved = next.practice ? await resumeGuestPreparation(next.practice, next.viewer) : !next.mission.authenticated ? await practiceRequest() : { state: emptyPractice(), scope: 'account' };
       if (!alive.current) return;
       if (owner.current !== next.viewer) {
         owner.current = next.viewer; setNotes(next.mission.record?.blockscholar?.reflection || blankNotes()); setDirty(false); setNoteStatus(''); setResults({});
       }
-      setData(next); setPractice(saved.state); setScope(saved.scope); setError('');
+      setData(next); setPractice(saved.state); setScope(saved.scope); setResumeNotice(saved.notice || ''); setError('');
     } catch (e) { if (alive.current) setError(e.message || 'Your program could not load. Please retry.'); }
   }, []);
   useEffect(() => {
@@ -109,7 +111,7 @@ export function BlockscholarProgram({ initialView = 'program', compact = false, 
           <h2>{count === 3 ? 'Your work is saved.' : BLOCKSCHOLAR.outcomes[nextIndex].title}</h2>
           <p>{count === 3 ? 'Review your learning record and revisit any step.' : BLOCKSCHOLAR.outcomes[nextIndex].evidence}</p>
           <button className="sm-primary" type="button" disabled={!!busy} onClick={continueProgram}>{count === 3 ? 'View my work' : mission.authenticated && !enrolled ? 'Join & continue →' : 'Continue →'}</button>
-          <div className="bs-progress-caption"><span>{mission.authenticated ? `${count} of 3 milestones saved` : count ? 'Quiz saved in this browser · sign in for the workshop' : 'Explore now · sign in to save your program'}</span><progress value={count} max="3" aria-label="Program milestones saved"/></div>
+          <div className="bs-progress-caption"><span>{mission.authenticated ? `${count} of 3 milestones saved${scope === 'device' ? ' · quiz on this browser' : ''}` : count ? 'Quiz saved in this browser · sign in for the workshop' : 'Explore now · sign in to save your program'}</span><progress value={count} max="3" aria-label="Program milestones saved"/></div>
         </article>
         {!mission.authenticated && <div className="bs-access"><button type="button" className="bs-text-button" aria-expanded={showSignIn} onClick={() => setShowSignIn(!showSignIn)}>Already started? Sign in to resume</button>{showSignIn && <div className="bs-signin"><p>Use your DRMZ wallet or email.</p>{view === 'program' && login}</div>}</div>}
         <ol className="bs-path" aria-label="Your program path">{BLOCKSCHOLAR.outcomes.map((outcome, i) => <li key={outcome.title}><span className={milestones[i] ? 'bs-check done' : 'bs-check'} aria-label={milestones[i] ? 'Saved' : 'Not yet saved'}>{milestones[i] ? '✓' : `0${i + 1}`}</span><button type="button" onClick={() => choose(['learn', 'mission', 'work'][i])}><strong>{['Learn the essentials', 'Enter the Strike workshop', 'Write your field note'][i]}</strong><span>{['Six lessons together, then one quiz', 'Set up, fund, then practice an order', 'Connect the skill to your work'][i]}</span></button></li>)}</ol>
@@ -128,6 +130,7 @@ export function BlockscholarProgram({ initialView = 'program', compact = false, 
         <div className="bs-section-intro"><span className="sm-step-label">OPTIONAL · RETURN ANYTIME</span><h2>Strike Training</h2><p>Learn the direction. Open a small test position. Close it and keep the verified evidence. Your existing wallet and workshop progress stay with you.</p></div>
       </section>
       <section className="bs-panel bs-mission-panel" hidden={view !== 'mission' && view !== 'practice'} aria-label="Verified Strike mission">
+        {view === 'mission' && resumeNotice && <p className="sm-small" role="status">{resumeNotice}</p>}
         {missionOpened && <StrikeMission compact embedded positionMode={view === 'practice'} signIn={['mission','practice'].includes(view) ? login : null} onChange={changedMission}/>}
         {view === 'mission' && record?.completedAt && <div className="bs-next-actions"><button type="button" className="sm-primary" onClick={() => choose('practice')}>Practice a long or short →</button><button className="sm-primary" type="button" onClick={() => choose('work')}>Continue to your field note →</button></div>}
       </section>
