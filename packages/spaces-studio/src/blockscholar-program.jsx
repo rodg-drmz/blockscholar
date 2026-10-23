@@ -113,7 +113,7 @@ export function BlockscholarProgram({ initialView = 'program', compact = false, 
           <button className="sm-primary" type="button" disabled={!!busy} onClick={continueProgram}>{count === 3 ? 'View my work' : mission.authenticated && !enrolled ? 'Join & continue →' : 'Continue →'}</button>
           <div className="bs-progress-caption"><span>{mission.authenticated ? `${count} of 3 milestones saved${scope === 'device' ? ' · quiz on this browser' : ''}` : count ? 'Quiz saved in this browser · sign in for the workshop' : 'Explore now · sign in to save your program'}</span><progress value={count} max="3" aria-label="Program milestones saved"/></div>
         </article>
-        {!mission.authenticated && <div className="bs-access"><button type="button" className="bs-text-button" aria-expanded={showSignIn} onClick={() => setShowSignIn(!showSignIn)}>Already started? Sign in to resume</button>{showSignIn && <div className="bs-signin"><p>Use your DRMZ wallet or email.</p>{view === 'program' && login}</div>}</div>}
+        {!mission.authenticated && <div className="bs-access"><button type="button" className="bs-text-button" aria-expanded={showSignIn} onClick={() => setShowSignIn(!showSignIn)}>Already started? Sign in to resume</button>{showSignIn && <div className="bs-signin">{view === 'program' && login}</div>}</div>}
         <ol className="bs-path" aria-label="Your program path">{BLOCKSCHOLAR.outcomes.map((outcome, i) => <li key={outcome.title}><span className={milestones[i] ? 'bs-check done' : 'bs-check'} aria-label={milestones[i] ? 'Saved' : 'Not yet saved'}>{milestones[i] ? '✓' : `0${i + 1}`}</span><button type="button" onClick={() => choose(['learn', 'mission', 'work'][i])}><strong>{['Learn the essentials', 'Enter the Strike workshop', 'Write your field note'][i]}</strong><span>{['Six lessons together, then one quiz', 'Set up, fund, then practice an order', 'Connect the skill to your work'][i]}</span></button></li>)}</ol>
         <div className="bs-program-footnote"><p>Self-paced · no enrollment fee · testnet only</p><p>Dream Fund supports a <strong>2 test-ADA bounty</strong> for a verified mission, subject to available funding.</p><button className="bs-text-button" type="button" onClick={() => choose('fund')}>See the Dream Fund →</button></div>
       </section>
@@ -123,7 +123,7 @@ export function BlockscholarProgram({ initialView = 'program', compact = false, 
         <article className="sm-card bs-quiz" id={`${fieldId}-quiz`}>
           <span className="sm-step-label">ONE KNOWLEDGE CHECK</span><h2>{ready && !reviewPrep ? 'Ready for the workshop.' : 'Check your understanding.'}</h2>
           {ready && !reviewPrep ? <><p>Your saved best score is {practice.prepScore} of 8.</p><div className="bs-next-actions"><button className="sm-primary" type="button" onClick={() => choose('mission')}>Enter the workshop →</button><button className="bs-text-button" type="button" onClick={() => setReviewPrep(true)}>Try the quiz again</button></div></> : <><p>Eight questions about perpetuals and Strike. Pass six; your best score is kept.</p><ScenarioExercise kind="prep" result={results.prep} onSubmit={answers => submitPractice({ type: 'prep', answers })} busy={!!busy} error={practiceError} onReset={() => setResults(previous => ({ ...previous, prep: null }))}/>{ready && <div className="bs-next-actions"><button className="sm-primary" type="button" onClick={() => choose('mission')}>Enter the workshop →</button></div>}</>}
-          <p className="sm-small">{scope === 'account' ? 'Saved to your DRMZ account.' : 'Guest practice is saved in this browser. Sign in to save the workshop to your account.'}</p>
+          <p className="sm-small">{scope === 'account' ? 'Saved to your account.' : 'Guest practice is saved in this browser. Sign in to save the workshop to your account.'}</p>
         </article>
       </section>
       <section className="bs-panel" hidden={view !== 'practice'} aria-label="Strike Training">
@@ -161,6 +161,6 @@ export function BlockscholarProgram({ initialView = 'program', compact = false, 
       <section className="bs-panel" hidden={view !== 'fund'}><DreamFund active={view === 'fund'}/></section>
     </>}
     <footer className="sm-footer bs-footer"><a href="/learn/blockscholar" target="_top">← Learn</a><a href={BLOCKSCHOLAR.worldHref} target="_top">Explore DRMZ Spaces ↗</a></footer>
-    <p className="bs-pilot-note">Independent DRMZ pilot. Test ADA has no monetary value. No college credit or district endorsement is implied.</p>
+    <p className="bs-pilot-note">Learn with test funds. No real-money trading or academic credit.</p>
   </section>;
 }

@@ -45,7 +45,7 @@ test('legacy scores stay browser-only and do not reset preparation or mint serve
   const saved = await resumeGuestPreparation(emptyPractice(), 'learner-a', async () => { throw new Error('Should not submit a grade'); }, storage);
   assert.equal(saved.state.prepScore, 8); assert.equal(saved.scope, 'device');
   assert.equal(saved.state.challengeScore, 0); assert.equal(saved.state.credits, 0);
-  assert.match(saved.notice!, /do not need to repeat/);
+  assert.match(saved.notice!, /Continue to wallet setup/);
 });
 
 test('network interruption preserves guest answers for a safe retry', async () => {

@@ -50,3 +50,5 @@
 .sm-position-paused { margin:24px 0; padding:22px; border:1px solid #b695ff66; border-radius:18px; background:#a78bfa12; }
 .sm-position-paused h3 { margin:0 0 12px; }
 .sm-position-paused p:last-child { margin-bottom:0; }
+
+.sm-inline-approval{flex-basis:100%;width:100%;margin:16px 0 0;padding:16px;border:1px solid #bba0ff45;border-radius:12px;background:#bba0ff0a}.sm-inline-approval p{margin:0 0 12px}.sm-setup-connector>button{margin-bottom:4px}.sm-deposit-status .sm-action-row{margin-top:20px}.sm-setup-receipts{margin-top:24px}.sm-setup .sm-setup-step{margin:20px 0;padding:20px 0;border-top:1px solid #b7a2df22}

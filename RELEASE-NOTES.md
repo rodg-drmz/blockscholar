@@ -33,3 +33,12 @@ The full Spaces engine, Quorum, Oneirium and academic infrastructure remain in t
 - Added coverage for view restoration, guest-to-account grading, retries, unavailable storage, and account isolation. 76 automated tests pass.
 
 No private DRMZ service was redeployed for this release. Existing local and hosted records remain where they were. This public demo uses fresh progress records.
+
+## Clear wallet and deposit progress — October 23, 2026
+
+- Standalone sign-in is now a single wallet-only panel. Removed email entry and references to signing in with a DRMZ account; existing records are preserved. Workshop connection controls only appear after sign-in.
+- Connection approval now appears directly below its Connect button. Connected wallet controls disappear; completed funding and transaction details move into Wallet & receipts.
+- Distinguishes Cardano payment confirmation from verified Strike trading credit. Pending deposits show automatic checks, a last-checked time, a manual retry, and visible connection errors. No repeat payment is requested.
+- Receipt checks run before registration retries, so an expired browser signing session or failed registration cannot prevent checking an already settled deposit. Checks resume when returning to the page. Only the existing verified receipt unlocks the workshop.
+- Simplified learner-facing copy and preserved fee/destination review before signing.
+- 82 automated tests and production build/type validation passed. The learner's current deposit still needs its public receipt checked; this UI release does not certify that payment as settled or the full phone bounty flow as complete.

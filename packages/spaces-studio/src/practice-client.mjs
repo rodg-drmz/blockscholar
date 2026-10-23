@@ -51,8 +51,8 @@ export async function resumeGuestPreparation(accountState, viewer, fetcher = fet
       if (!response.ok || saved.scope !== 'account') throw new Error('Preparation sync unavailable');
       return saved;
     } catch {
-      return { state: { ...accountState, prepScore: guest.prepScore }, scope: 'device', notice: 'Your quiz is saved in this browser. Account syncing will retry when you return; you can continue wallet setup now.' };
+      return { state: { ...accountState, prepScore: guest.prepScore }, scope: 'device', notice: 'Quiz saved on this device. You can continue while account syncing retries.' };
     }
   }
-  return { state: { ...accountState, prepScore: guest.prepScore }, scope: 'device', notice: 'Your earlier quiz result is saved in this browser. Continue wallet setup; you do not need to repeat it. Retaking the quiz later also saves it to your account.' };
+  return { state: { ...accountState, prepScore: guest.prepScore }, scope: 'device', notice: 'Quiz saved on this device. Continue to wallet setup.' };
 }
