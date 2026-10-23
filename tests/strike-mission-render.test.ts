@@ -75,7 +75,7 @@ test('entering Mission reports a resumable view and restores it after a sign-in 
     await act(async () => { renderer = create(React.createElement(BlockscholarProgram, { initialView: view })); });
     assert.equal(renderer!.root.findByProps({'aria-label': 'Verified Strike mission'}).props.hidden, false);
     assert.equal(renderer!.root.findByProps({'aria-label': 'Strike lessons'}).props.hidden, true);
-    assert.match(JSON.stringify(renderer!.toJSON()), /Your testnet workspace/);
+    assert.match(JSON.stringify(renderer!.toJSON()), /Your DeFi workspace/i);
   } finally { act(() => renderer?.unmount()); }
 });
 
@@ -116,7 +116,7 @@ test('signature approval stays beside Connect and successful connection removes 
     await act(async()=>{renderer!.root.findAllByType('select')[0].props.onChange({target:{value:'test'}});});
     const connect=renderer!.root.findAllByType('button').find(b=>b.props.children==='Connect Strike testnet')!;
     await act(async()=>{await connect.props.onClick();});
-    const approval=renderer!.root.findAllByType('button').find(b=>Array.isArray(b.props.children)&&b.props.children[0]==='Approve in ')!;
+    const approval=renderer!.root.findAllByType('button').find(b=>b.props.children==='Authorize Strike practice')!;
     assert.ok(approval);
     let parent=approval.parent;while(parent&&!String(parent.props.className).includes('sm-connect-section'))parent=parent.parent;
     assert.ok(parent,'Approval must be inside the connection card, not above the workshop');

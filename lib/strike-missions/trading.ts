@@ -5,7 +5,17 @@ import * as CSL from '@emurgo/cardano-serialization-lib-nodejs';
 import { paymentIdentity, verifyBadgeWalletSignature } from '../auth/cardano-proof';
 import { MissionError, actionSchema, practiceRecord, workshopRecord } from './model';
 import { getRecord, updateRecord } from './store';
-import { accountFor, accountFunding, STRIKE_TESTNET_API } from './strike';
+import { accountFor, accountFunding, orderForClient, STRIKE_TESTNET_API } from './strike';
+
+import { saveVerifiedCancellation } from './cancellation';
+
+async function reconcileCancellation(actor: string, record: ReturnType<typeof workshopRecord>) {
+  const raw = await orderForClient(record.wallet!, record.trade!.clientId);
+  if (String(raw?.ID) !== record.order?.id || raw.AccountID !== record.accountId || raw.ClientOrderID !== record.trade!.clientId) throw new MissionError('Strike returned a different order. Your saved checkpoint is unchanged.', 503);
+  if (raw.Status !== 'canceled') return null;
+  saveVerifiedCancellation(actor, raw);
+  return { notice: 'Cancellation verified. Your order had zero fills and your completion is saved.' };
+}
 
 export function builderCode() { const code = process.env.STRIKE_MISSIONS_BUILDER_CODE || ''; return /^[a-zA-Z0-9_-]{1,80}$/.test(code) ? code : null; }
 export async function testnetRequest(path: string, init?: RequestInit) {
@@ -126,6 +136,7 @@ export async function tradingAction(actor: string, a: Action, origin: string): P
     return {};
   }
   if (a.type === 'trade-submit') {
+    if (a.operation === 'cancel' && r.completedAt) return { notice: 'Cancellation already verified. Your completion is saved.' };
     if (!r.trade || r.completedAt) throw new MissionError('Prepare a test order before submitting.');
     if (a.headers['X-API-Wallet-Public-Key'] !== r.apiPublicKey) throw new MissionError('Reconnect Strike in this browser to use its current session key.');
     if (a.operation === 'place' && r.trade.status !== 'draft') throw new MissionError('This order was already sent. Check its status; it will not be placed twice.', 409);
@@ -139,13 +150,32 @@ export async function tradingAction(actor: string, a: Action, origin: string): P
       if (latest.trade?.body !== body || latest.trade.status !== 'draft') throw new MissionError('This order was already sent. Check its status.', 409);
       latest.trade.status = 'sent'; latest.trade.sentAt = Date.now();
     });
+    if (a.operation === 'cancel') {
+      const settled = await reconcileCancellation(actor, r);
+      if (settled) return settled;
+    }
     let response;
     try { response = await testnetRequest(route, { method, headers: { ...a.headers, 'content-type': 'application/json', 'X-Builder-Fee-Bps': '0' }, body }); }
-    catch { throw new MissionError('Strike’s response was interrupted. Check the saved order status; do not submit another order.', 503); }
+    catch {
+      if (a.operation === 'cancel') {
+        const settled = await reconcileCancellation(actor, r).catch(() => null);
+        if (settled) return settled;
+      }
+      throw new MissionError('Strike’s response was interrupted. Check the saved order status; do not submit another order.', 503);
+    }
     if (!response.ok) {
+      if (a.operation === 'cancel') {
+        const settled = await reconcileCancellation(actor, r).catch(() => null);
+        if (settled) return settled;
+        throw new MissionError([401, 403].includes(response.status) ? 'Strike rejected this trading authorization. Check the order status first; authorize Strike again only if the order is still open.' : 'Strike did not confirm cancellation. Check the saved order status before trying again. No new deposit is needed.', 503);
+      }
       // A gateway timeout does not tell us whether the sequencer accepted the order.
       if (a.operation === 'place' && [400, 401, 403, 404, 422, 429].includes(response.status)) updateRecord(actor, latest => { if (latest.trade?.clientId === r.trade!.clientId) latest.trade.status = 'rejected'; });
       throw new MissionError('Strike has not accepted the request. Check the account’s test balance, session key, and order status. No real-fund deposit is needed for this mission.');
+    }
+    if (a.operation === 'cancel') {
+      const settled = await reconcileCancellation(actor, r).catch(() => null);
+      if (settled) return settled;
     }
     return { notice: a.operation === 'place' ? 'Order request sent. Check its status to save the open-order checkpoint.' : 'Cancellation requested. Check its status to verify completion.' };
   }

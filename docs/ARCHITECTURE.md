@@ -4,7 +4,7 @@ Browser → Next.js authentication and mission API → Strike testnet / Cardano 
 
 ## Identity and persistence
 
-Email links are single-use, expiring tokens delivered through Resend. Wallet login uses a nonce-bound signed challenge, verified on the server; a login signature does not authorize trading. Signed HttpOnly cookies identify a stable per-service account. Wallet and verified email linking retain the account identity. New hosting intentionally has a fresh identity store: the private DRMZ database is never exported.
+The public entry is wallet-only. Legacy email endpoints remain isolated from the entry UI to preserve existing records. Wallet login uses a nonce-bound signed challenge, verified on the server; a login signature does not authorize trading. Signed HttpOnly cookies identify a stable per-service account. Wallet and verified email linking retain the account identity. New hosting intentionally has a fresh identity store: the private DRMZ database is never exported.
 
 Lesson progress is written atomically to account-specific protected JSON. Mission records, order checkpoints and payout outboxes are persisted in SQLite. Sign-out and reconnect do not discard records. Browser trading keys are ephemeral and must be re-authorized after reload.
 
@@ -14,7 +14,7 @@ The browser authorizes a trade-only Strike key through a Cardano wallet. The ser
 
 Mission completion requires an open-order checkpoint and matching canceled order belonging to the linked account, with zero fills. Position missions separately verify their entry and close and pause if liquidity is unavailable. A response being accepted is not treated as a confirmed fill or completion.
 
-Bounties are 2 test ADA, bounded by the pilot campaign cap, with account and wallet uniqueness checks. The practice sponsor grants 104 test ADA for a 100-test-ADA deposit, 2-test-ADA batcher fee and network costs. Each sponsor has a separate key and durable outbox. Payout retries recover the saved transaction instead of blindly sending again. These are test tokens, not earnings or a mainnet yield product.
+Bounties are 2 test ADA for the verified mission plus a separate 3-test-ADA field-note completion reward, bounded by the pilot campaign cap, with account and wallet uniqueness checks. The practice sponsor grants 104 test ADA for a 100-test-ADA deposit, 2-test-ADA batcher fee and network costs. Each sponsor has a separate key and durable outbox. Payout retries recover the saved transaction instead of blindly sending again. These are test tokens, not earnings or a mainnet yield product.
 
 ## Hosting
 

@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { newStrikeSession, signTestOrder, signDepositRequest, connectionAddress, walletRequest, inspectWalletAccount, assertWalletAccount } from './strike-session.mjs';
 import { lessonSubmission } from './mission-check.mjs';
+import { rememberStrikeTabSession, strikeTabSession, clearStrikeTabSessions } from './strike-tab-session.mjs';
+import { loginWalletProvider } from './login-wallet.mjs';
 import { reconcileDeposit } from './deposit-progress.mjs';
 import { StrikeWalletSetup } from './strike-wallet-setup.jsx';
 import { StrikeWorkshopGuide } from './strike-workshop-guide.jsx';
@@ -8,7 +10,7 @@ import { StrikePositionMissions } from './strike-position-missions.jsx';
 
 const endpoint = '/api/learn/strike-mission';
 export async function missionRequest(action) {
-  const response = await fetch(endpoint, { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(action?.type === 'claim' || action?.type === 'receipt' || action?.type?.startsWith('practice-') || action?.type?.startsWith('deposit-') ? 95_000 : 35_000), ...(action ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(action) } : {}) });
+  const response = await fetch(endpoint, { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(action?.type === 'claim' || action?.type === 'receipt' || action?.type?.startsWith('field-note-') || action?.type?.startsWith('practice-') || action?.type?.startsWith('deposit-') ? 95_000 : 35_000), ...(action ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(action) } : {}) });
   const data = await response.json();
   if (!response.ok) throw Object.assign(new Error(data.error || 'The mission could not update. Please retry.'), { status: response.status });
   return data;
@@ -18,24 +20,28 @@ function walletProviders() {
   let source = window.cardano;
   try { source ||= window.parent?.cardano; } catch { /* Standalone page. */ }
   const names = new Set();
-  return Object.entries(source || {}).filter(([, value]) => {
+  return Object.entries(source || {}).filter(([id, value]) => {
     if (typeof value?.enable !== 'function') return false;
+    if ([id, value.name].some(name => String(name || '').toLowerCase() === 'nufi')) return false;
     const name = String(value.name || '').toLowerCase();
     if (name && names.has(name)) return false;
     if (name) names.add(name);
     return true;
   }).map(([id, value]) => ({ id, name: value.name || id, provider: value }));
 }
-/** @param {{signIn?: import('react').ReactNode, compact?: boolean, embedded?: boolean, positionMode?:boolean, onChange?: (data: any) => void}} props */
-export function StrikeMission({ signIn = null, compact = false, embedded = false, positionMode=false, onChange }) {
+/** @param {{signIn?: import('react').ReactNode, compact?: boolean, embedded?: boolean, positionMode?:boolean, onChange?: (data: any) => void, walletConnection?: any}} props */
+export function StrikeMission({ signIn = null, compact = false, embedded = false, positionMode=false, onChange, walletConnection=null }) {
   const [data, setData] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(''), [answers, setAnswers] = useState({}), [orderId, setOrderId] = useState('');
   const [wallets, setWallets] = useState([]), [walletId, setWalletId] = useState('');
   const [approvalName, setApprovalName] = useState('');
+  const [feedbackArea, setFeedbackArea] = useState('load');
   const [approvalPlace, setApprovalPlace] = useState('connect');
   const [setupCheck, setSetupCheck] = useState({checking:false, checkedAt:null, warning:''});
   const [walletDiagnostic, setWalletDiagnostic] = useState(null);
   const [showRestart, setShowRestart] = useState(false);
   const preparedConnection = useRef(null);
+  const autoPrepared = useRef(false);
+  const loginWallet = loginWalletProvider(wallets, walletConnection);
   const [lessonFeedback, setLessonFeedback] = useState('');
   const [replaceOrder, setReplaceOrder] = useState(false);
   const [funding, setFunding] = useState(null);
@@ -43,8 +49,23 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
   const feedbackRef = useRef(null), connectRef = useRef(null), stageRef = useRef(null);
   const pending = useRef(false), mounted = useRef(true), strikeSession = useRef(null), practiceSession = useRef(null);
   useEffect(() => { if (data) onChange?.(data); }, [data, onChange]);
+  useEffect(() => { if (data?.authenticated === false) { clearStrikeTabSessions(); strikeSession.current = null; practiceSession.current = null; } }, [data?.authenticated]);
+  useEffect(() => {
+    if (!data?.authenticated) return;
+    for (const connection of [data.record, data.record?.practiceConnection]) {
+      const session = [strikeSession.current, practiceSession.current].find(s => s?.publicKey && s.publicKey === connection?.apiPublicKey);
+      if (session) rememberStrikeTabSession(data.record, connection, session);
+    }
+  }, [data]);
   const refresh = useCallback(async (clearError = true) => {
-    try { const value = await missionRequest(); if (mounted.current) { setData(value); if (clearError) setError(''); } }
+    try {
+      let value = await missionRequest();
+      // Returning from Strike only reads the existing order; it never requests wallet consent.
+      if (value.authenticated && value.record?.order && value.record?.trade?.status === 'sent' && !value.record.completedAt) {
+        value = await missionRequest({ type: 'order-check' }).catch(() => value);
+      }
+      if (mounted.current) { setData(value); if (clearError) setError(''); }
+    }
     catch (e) { if (mounted.current) setError(e.name === 'TimeoutError' ? 'Connection timed out. Your saved progress is unchanged.' : e.message); }
   }, []);
   useEffect(() => {
@@ -63,7 +84,7 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
     const timer = setInterval(async () => {
       if (Date.now() > stopAt) { clearInterval(timer); return; }
       if (pending.current || document.visibilityState !== 'visible') return;
-      pending.current = true; setBusy('Checking bounty confirmation…');
+      pending.current = true; setFeedbackArea('reward'); setBusy('Checking bounty confirmation…');
       try {
         const saved = await missionRequest({ type: 'receipt' });
         // A successful retry replaces the earlier network warning as well as the receipt.
@@ -74,9 +95,9 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
     }, 15_000);
     return () => clearInterval(timer);
   }, [paymentHash, paymentStatus]);
-  const run = async (label, fn) => {
+  const run = async (label, fn, area = positionMode ? 'position' : ['quiz','connect','order','verify','reward','setup'][stage]) => {
     if (pending.current) return;
-    pending.current = true; setBusy(label); setError('');
+    pending.current = true; setFeedbackArea(area); setBusy(label); setError('');
     try { const result = await fn(); if (mounted.current) { setData(result); if (result.funding) setFunding({ ...result.funding, accountId: result.funding.accountId || result.record?.accountId }); } }
     catch (e) {
       // Reload the durable record, including a payout saved before a network timeout.
@@ -84,20 +105,20 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
       if (mounted.current) { if (saved) setData(saved); setError(e?.name === 'TimeoutError' || e?.name === 'AbortError' ? 'The request took too long. Your saved progress is safe; check again.' : e?.message || 'The wallet request was not completed. Please retry.'); }
     } finally { pending.current = false; if (mounted.current) setBusy(''); }
   };
-  const act = (action, label) => run(label, () => missionRequest(action));
+  const act = (action, label) => run(label, () => missionRequest(action), action.type === 'observe' ? 'external-order' : action.type === 'account-check' && stage === 2 && !positionMode ? 'balance' : undefined);
   const switchAttempt = attemptId => run(attemptId ? 'Restoring your saved practice…' : 'Starting a fresh practice workspace…', async () => {
     const result = await missionRequest({type:attemptId ? 'practice-restore' : 'practice-restart',expectedUpdatedAt:data.record.updatedAt,...(attemptId ? {attemptId} : {})});
     strikeSession.current=null; practiceSession.current=null; preparedConnection.current=null;
     setApprovalName(''); setWalletDiagnostic(null); setFunding(null); setReviewSetup(false); setReplaceOrder(false); setShowRestart(false);
     return result;
-  });
+  }, 'account');
   const checkUnderstanding = async event => {
     event.preventDefault();
     if (pending.current) return;
     setLessonFeedback('');
     const submission = lessonSubmission(data, answers);
     if (submission.message) { setLessonFeedback(submission.message); return; }
-    pending.current = true; setBusy('Checking your answers…'); setError('');
+    pending.current = true; setFeedbackArea('quiz'); setBusy('Checking your answers…'); setError('');
     try { const result = await missionRequest(submission.action); if (mounted.current) setData(result); }
     catch (e) {
       if (mounted.current) {
@@ -107,25 +128,26 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
     } finally { pending.current = false; if (mounted.current) setBusy(''); }
   };
   useEffect(() => { if (lessonFeedback) feedbackRef.current?.focus({ preventScroll: true }); }, [lessonFeedback]);
-  const setupSession = (record = data?.record) => [practiceSession.current, strikeSession.current].find(s => s?.publicKey && s.publicKey === (record?.practiceConnection?.apiPublicKey || record?.apiPublicKey));
-  const tradingSession = () => [strikeSession.current, practiceSession.current].find(s => s?.publicKey && s.publicKey === data?.record?.apiPublicKey);
+  const setupSession = (record = data?.record) => [practiceSession.current, strikeSession.current].find(s => s?.publicKey && s.publicKey === (record?.practiceConnection?.apiPublicKey || record?.apiPublicKey)) || strikeTabSession(record, record?.practiceConnection || record);
+  const tradingSession = () => [strikeSession.current, practiceSession.current].find(s => s?.publicKey && s.publicKey === data?.record?.apiPublicKey) || strikeTabSession(data?.record);
   const inspectConnection = () => run('Checking wallet account…', async () => {
     const choices = walletProviders();
-    const wallet = choices.find(w => w.id === walletId);
+    const wallet = choices.find(w => w.id === walletId) || loginWalletProvider(choices, walletConnection);
     if (!wallet) throw new Error('Select your Cardano wallet first.');
     const api = await walletRequest('enable', () => wallet.provider.enable());
     const network = await walletRequest('network', () => api.getNetworkId());
     const details = await inspectWalletAccount(api, data?.record?.wallet);
     setWalletDiagnostic({ ...details, name:wallet.name, network });
     return missionRequest();
-  });
-  const connect = (purpose, place = purpose === 'practice' ? 'setup' : purpose === 'reward' ? 'reward' : purpose === 'strike' ? 'external' : 'connect') => run('Connecting wallet…', async () => {
+  }, 'connection');
+  const connect = (purpose, place = purpose === 'practice' ? 'setup' : purpose === 'reward' ? 'reward' : purpose === 'strike' ? 'external' : 'connect', selectedWallet = null) => run('Connecting wallet…', async () => {
     setApprovalPlace(place);
     preparedConnection.current = null; setApprovalName('');
     const choices = walletProviders(); setWallets(choices);
-    const wallet = choices.find(w => w.id === walletId);
+    const wallet = selectedWallet || choices.find(w => w.id === walletId) || loginWalletProvider(choices, walletConnection);
     if (!wallet) throw new Error('Choose the wallet you want to use for practice. On a phone, open this page inside that wallet’s browser. Your DRMZ sign-in stays active.');
-    const api = await walletRequest('enable', () => wallet.provider.enable());
+    setWalletId(wallet.id);
+    const api = wallet.id === loginWallet?.id && walletConnection?.api ? walletConnection.api : await walletRequest('enable', () => wallet.provider.enable());
     if ((purpose === 'reward' || purpose === 'builder' || purpose === 'practice') && await walletRequest('network', () => api.getNetworkId()) !== 0) throw new Error('Switch your Cardano wallet to Preprod for this practice workspace.');
     const address = await walletRequest('address', () => connectionAddress(api, purpose, data?.record));
     if (purpose === 'builder' && data?.record?.wallet) {
@@ -140,7 +162,7 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
     preparedConnection.current = {api, session, check, purpose, name:wallet.name, expires:Date.now()+180_000};
     setApprovalName(wallet.name);
     return check;
-  });
+  }, place === 'reconnect' ? 'connection' : place === 'external' ? 'connect' : place);
   const approveConnection = () => run('Opening wallet approval…', async () => {
     const prepared = preparedConnection.current;
     preparedConnection.current = null; setApprovalName('');
@@ -151,13 +173,18 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
     setBusy('Verifying your Strike testnet connection…');
     const result = await missionRequest({ type: session ? 'builder-connect' : 'link', proof });
     if (session) { if (purpose === 'practice' && result.record?.practiceConnection) practiceSession.current = session; else strikeSession.current = session; }
+    if (session) rememberStrikeTabSession(result.record, purpose === 'practice' ? result.record?.practiceConnection || result.record : result.record, session);
     if (purpose !== 'reward') {
       // A balance-read outage must not turn a successful connection into a failed login.
       return await missionRequest({ type: purpose === 'practice' ? 'practice-account-check' : 'account-check' }).catch(() => result);
     }
     return result;
-  });
-  const trade = operation => run(operation === 'place' ? 'Sending the reviewed testnet order…' : 'Requesting cancellation…', async () => {
+  }, approvalPlace === 'reconnect' ? 'connection' : approvalPlace === 'external' ? 'connect' : approvalPlace);
+  const trade = operation => run(operation === 'place' ? 'Sending the reviewed testnet order…' : 'Checking this order before cancellation…', async () => {
+    if (operation === 'cancel') {
+      const checked = await missionRequest({ type: 'order-check' }).catch(() => null);
+      if (checked?.record?.completedAt) return checked;
+    }
     const session = tradingSession();
     if (!session || session.publicKey !== data.record.apiPublicKey) throw new Error('Reconnect Strike testnet in this tab before trading. Your mission progress is saved.');
     const body = operation === 'place' ? data.record.trade.body : JSON.stringify({ symbol: 'ETH-USD', client_order_id: data.record.trade.clientId });
@@ -237,10 +264,26 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
   const stage = !r.accountId ? 1 : reviewSetup || !setupReady ? 5 : !r.lessonAt ? 0 : !completed && (!r.order || replaceOrder) ? 2 : !completed ? 3 : 4;
   useEffect(() => { setReplaceOrder(false); }, [r.order?.id, r.accountId, completed]);
   useEffect(() => { if (embedded && data) stageRef.current?.focus({ preventScroll: true }); }, [stage, embedded]);
+  useEffect(() => {
+    if (!data?.authenticated || data.record?.accountId || !data.builderConfigured || ![1,5].includes(stage) || !loginWallet || autoPrepared.current || busy) return;
+    // Reuse an approved tab session after a workspace remount; do not rotate its key.
+    if (stage === 5 ? setupSession() : tradingSession()) return;
+    autoPrepared.current = true;
+    let active=true;
+    const prepare = async () => {
+      try {
+        const permitted = !!walletConnection?.api || (typeof loginWallet.provider.isEnabled === 'function' && await loginWallet.provider.isEnabled());
+        if (active && permitted) await connect(stage === 5 ? 'practice' : 'builder', stage === 5 ? 'setup' : stage === 1 ? 'connect' : positionMode ? 'position' : 'reconnect',loginWallet);
+      } catch { /* Keep the explicit Enable practice action available. */ }
+    };
+    void prepare();
+    return () => { active=false; };
+  }, [data?.authenticated, data?.builderConfigured, stage, loginWallet?.id]);
   const reconnect = embedded && stage > 1 && stage < 4 && r.accountId && !tradingSession();
-  const walletChoice = <div className="sm-wallet"><label>Cardano wallet<select aria-label="Cardano wallet" value={walletId} onChange={e => { setWalletId(e.target.value); preparedConnection.current=null; setApprovalName(''); }} disabled={!!busy}><option value="">{wallets.length ? 'Choose a wallet' : 'Open in a Cardano wallet browser'}</option>{wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label><button type="button" disabled={!!busy} onClick={() => setWallets(walletProviders())}>Find wallets</button></div>;
-  const approvalFor = place => approvalName && approvalPlace === place ? <div className="sm-inline-approval" role="status"><p>Confirm the connection in {approvalName}.</p><div className="sm-action-row"><button type="button" className="sm-primary" disabled={!!busy} onClick={approveConnection}>Approve in {approvalName}</button><button type="button" className="bs-text-button" disabled={!!busy} onClick={() => { preparedConnection.current=null; setApprovalName(''); }}>Cancel</button></div></div> : null;
-  const connectionPanel = reconnect ? <details className="sm-reconnect"><summary>Reconnect your practice wallet to continue</summary><p>Use your linked wallet to authorize testnet orders in this tab. Your progress is saved.</p>{walletChoice}<div className="sm-action-row"><button type="button" className="sm-primary" disabled={!!busy || !walletId} onClick={() => connect('builder','reconnect')}>Reconnect Strike testnet</button>{approvalFor('reconnect')}<button type="button" disabled={!!busy || !walletId} onClick={inspectConnection}>Check wallet connection</button></div>{walletDiagnostic && <details><summary>Connection details</summary><p>{walletDiagnostic.name} · {walletDiagnostic.network === 0 ? 'Test network' : 'Mainnet'}</p><p>Funded address listed: {walletDiagnostic.savedAddressListed === null ? 'unknown' : walletDiagnostic.savedAddressListed ? 'yes' : 'no'}. Same staking key: {walletDiagnostic.sameStakeKey === null ? 'unknown' : walletDiagnostic.sameStakeKey ? 'yes' : 'no'}. Unavailable address checks: {walletDiagnostic.unavailableReads}.</p><p>This check does not sign, deposit, or change your linked account.</p></details>}</details> : null;
+  const walletChoice = loginWallet && (!walletId || walletId === loginWallet.id) ? <p className="sm-small">Using your signed-in {loginWallet.name} wallet</p> : <div className="sm-wallet"><label>Cardano wallet<select aria-label="Cardano wallet" value={walletId} onChange={e => { setWalletId(e.target.value); preparedConnection.current=null; setApprovalName(''); }} disabled={!!busy}><option value="">{wallets.length ? 'Choose a wallet' : 'Open in a Cardano wallet browser'}</option>{wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label><button type="button" disabled={!!busy} onClick={() => setWallets(walletProviders())}>Find wallets</button></div>;
+  const approvalFor = place => approvalName && approvalPlace === place ? <div className="sm-inline-approval" role="status"><p>{place === 'reward' ? `Verify your reward wallet in ${approvalName}.` : `Approve Strike practice in ${approvalName}.`}</p><div className="sm-action-row"><button type="button" className="sm-primary" disabled={!!busy} onClick={approveConnection}>{place === 'reward' ? 'Verify reward wallet' : 'Authorize Strike practice'}</button><button type="button" className="bs-text-button" disabled={!!busy} onClick={() => { preparedConnection.current=null; setApprovalName(''); }}>Cancel</button></div></div> : null;
+  const feedback = area => feedbackArea === area && (error || busy) ? <div className="sm-action-feedback" data-feedback-area={area}>{error ? <div className="sm-error" role="alert"><p>{error}</p><button type="button" disabled={!!busy} onClick={() => refresh()}>Reload saved record</button></div> : <p className="sm-status" role="status">{busy}</p>}</div> : null;
+  const connectionPanel = reconnect ? <details className="sm-reconnect" open={approvalPlace === 'reconnect' && !!approvalName || undefined}><summary>{loginWallet ? 'Authorize Strike practice' : 'Reconnect your practice wallet to continue'}</summary><p>Use your linked wallet to authorize testnet orders in this tab. Your progress is saved.</p>{walletChoice}<div className="sm-action-row"><button type="button" className="sm-primary" disabled={!!busy || (!walletId && !loginWallet)} hidden={!!approvalName && approvalPlace === 'reconnect'} onClick={() => connect('builder','reconnect')}>{loginWallet ? 'Enable Strike practice' : 'Reconnect Strike testnet'}</button>{approvalFor('reconnect')}<button type="button" disabled={!!busy || (!walletId && !loginWallet)} onClick={inspectConnection}>Check wallet connection</button></div>{feedback('connection')}{walletDiagnostic && <details><summary>Connection details</summary><p>{walletDiagnostic.name} · {walletDiagnostic.network === 0 ? 'Test network' : 'Mainnet'}</p><p>Funded address listed: {walletDiagnostic.savedAddressListed === null ? 'unknown' : walletDiagnostic.savedAddressListed ? 'yes' : 'no'}. Same staking key: {walletDiagnostic.sameStakeKey === null ? 'unknown' : walletDiagnostic.sameStakeKey ? 'yes' : 'no'}. Unavailable address checks: {walletDiagnostic.unavailableReads}.</p><p>This check does not sign, deposit, or change your linked account.</p></details>}</details> : null;
   return <section className={`strike-mission ${compact ? 'sm-compact' : ''}`} aria-label="Strike testnet mission">
     {!embedded && <header className="sm-hero">
       <div className="sm-kicker"><span className="sm-live-dot"/> STRIKE LAB / MISSION 01</div>
@@ -249,25 +292,24 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
       <div className="sm-pills"><span>Strike testnet</span><span>2 test ADA · Preprod</span><span>{data?.authenticated ? 'Saved to your DRMZ account' : 'Sign in to save progress'}</span></div>
     </header>}
     {!embedded && <ol className="sm-progress" aria-label="Mission progress">{['Learn', 'Connect', 'Inspect', 'Verify', 'Claim'].map((name, i) => <li key={name} className={steps[i] ? 'sm-done' : ''}><span aria-hidden>{steps[i] ? '✓' : `0${i + 1}`}</span>{name}<span className="sm-sr-only">{steps[i] ? ' complete' : ' not complete'}</span></li>)}</ol>}
-    {error && <div className="sm-error" role="alert">{error}<button type="button" disabled={!!busy} onClick={refresh}>Reload saved record</button></div>}
-    {busy && <p className="sm-status" role="status">{busy}</p>}
+    {feedback('load')}
     {!data && !error && <p role="status">Loading your mission…</p>}
     {data && !data.enabled && <div className="sm-card"><h2>This testnet mission is not enabled here yet.</h2><p>Your existing Learn progress is unchanged.</p></div>}
     {data?.enabled && <>
       {!data.authenticated && <div className="sm-card sm-signin">{signIn || <a className="sm-primary" href="/learn/quests/strike-mission" target="_top">Sign in & continue →</a>}</div>}
       {data.authenticated && <>
-      {positionMode && <StrikePositionMissions data={data} busy={busy} act={act} submit={positionTrade} connected={!!tradingSession()} connection={<div className="sm-notice"><p>Reconnect your existing funded wallet to authorize practice trades in this tab.</p>{walletChoice}<button type="button" className="sm-primary" disabled={!!busy || !walletId} onClick={()=>connect('builder','position')}>Reconnect same Strike account</button>{approvalFor('position')}</div>}/>}
+      {positionMode && <StrikePositionMissions data={data} busy={busy} act={act} submit={positionTrade} connected={!!tradingSession()} feedback={feedback('position')} connection={<div className="sm-notice"><p>Reconnect your existing funded wallet to authorize practice trades in this tab.</p>{walletChoice}<button type="button" className="sm-primary" disabled={!!busy || (!walletId && !loginWallet)} onClick={()=>connect('builder','position')}>Reconnect same Strike account</button>{approvalFor('position')}</div>}/>}
       <div hidden={positionMode}>
 
       {embedded && <header ref={stageRef} tabIndex={-1} className="bs-workshop-heading">
         <span className="sm-step-label">STRIKE TESTNET · WORKSHOP</span>
-        {stage !== 5 && <h2>{['Before you place an order.', 'Your testnet workspace.', 'Observe a real order.', 'Cancel. Then confirm.', paid ? 'Bounty received.' : 'Claim your learning bounty.', 'Your wallet & funding.'][stage]}</h2>}
+        {stage !== 5 && <h2>{['Before you place an order.', 'Your DeFi Workspace', 'Observe a real order.', 'Cancel. Then confirm.', paid ? 'Bounty received.' : 'Claim your learning bounty.', 'Your wallet & funding.'][stage]}</h2>}
       </header>}
       {stage === 5 && setupReady && <button type="button" className="bs-text-button" disabled={!!busy} onClick={() => setReviewSetup(false)}>Continue to workshop →</button>}
-      {stage !== 1 && stage !== 5 && <StrikeWorkshopGuide key={`${stage}-${r.trade?.status || ''}`} initialStep={stage <= 1 ? 0 : stage === 2 ? (r.trade?.status === 'sent' ? 3 : r.trade?.status === 'draft' ? 2 : 1) : stage === 3 ? 4 : 5}/>}
+      {stage !== 1 && stage !== 5 && <StrikeWorkshopGuide key={`${stage}-${r.trade?.status || ''}`} initialStep={stage <= 1 ? 0 : stage === 2 ? (r.trade?.status === 'sent' ? 4 : r.trade?.status === 'draft' ? 3 : 1) : stage === 3 ? 5 : 6}/>}
       {embedded && (r.deposit?.status === 'verified' || r.lessonAt) && <p className="bs-workshop-saved">{completed ? '✓ Mission verified · progress saved' : r.lessonAt ? '✓ Order readiness saved' : '✓ Strike deposit verified'}</p>}
-      {stage !== 2 && connectionPanel}
-      {r.accountId && (stage === 5 || !embedded && !setupReady) && <StrikeWalletSetup data={data} busy={busy} connected={!!setupSession()} walletControls={walletChoice} funding={funding} act={act} deposit={deposit} signDeposit={signDeposit} reconnect={() => connect('practice')} approval={approvalFor('setup')} checkState={setupCheck}/>}
+      {stage !== 2 && stage !== 3 && connectionPanel}
+      {r.accountId && (stage === 5 || !embedded && !setupReady) && <StrikeWalletSetup data={data} busy={busy} connected={!!setupSession()} walletControls={walletChoice} funding={funding} act={act} deposit={deposit} signDeposit={signDeposit} reconnect={() => connect('practice')} approval={approvalFor('setup')} checkState={setupCheck} feedback={feedback('setup')}/>}
       <article className="sm-card" hidden={embedded && stage !== 0}>
         {!embedded && <><div className="sm-step-label">01 / UNDERSTAND</div><h2>A price limit is a boundary.</h2></>}
         <details open={!embedded}><summary>Review the essentials</summary><div className="sm-lessons">
@@ -275,10 +317,11 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
           <div><span>02</span><h3>Watch what happened</h3><p>An accepted request may still be pending or rejected. Check the actual order status and filled quantity. A resting order can fill while you inspect it.</p></div>
           <div><span>03</span><h3>Know your exit</h3><p>Canceling stops the unfilled remainder. It does not reverse a fill or close an existing position. This mission requires an entirely unfilled order.</p></div>
         </div></details>
-        {r.lessonAt ? <div className="sm-check-result"><p className="sm-success" role="status">✓ Order-readiness check passed · saved to your account</p><button type="button" className="sm-secondary" onClick={() => { connectRef.current?.scrollIntoView({ block: 'start' }); connectRef.current?.focus({ preventScroll: true }); }}>Continue to your testnet workspace →</button></div> : <>
+        {r.lessonAt ? <div className="sm-check-result"><p className="sm-success" role="status">✓ Order-readiness check passed · saved to your account</p><button type="button" className="sm-secondary" onClick={() => { connectRef.current?.scrollIntoView({ block: 'start' }); connectRef.current?.focus({ preventScroll: true }); }}>Continue to your DeFi workspace →</button></div> : <>
           <form className="sm-knowledge-form" noValidate onSubmit={checkUnderstanding}>
             {data.questions.map(q => <fieldset key={q.id} disabled={!!busy}><legend>{q.prompt}</legend>{q.choices.map((choice, index) => <label className={answers[q.id] === index ? 'sm-selected' : ''} key={choice}><input type="radio" name={`strike-mission-${q.id}`} checked={answers[q.id] === index} onChange={() => { setAnswers(a => ({ ...a, [q.id]: index })); setLessonFeedback(''); }}/><span>{choice}</span></label>)}</fieldset>)}
             <div className="sm-check-actions"><p className="sm-small">{data.questions.filter(q => Number.isInteger(answers[q.id])).length} of {data.questions.length} answered{!data.authenticated && ' · sign in to save your result'}</p><button type="submit" className="sm-primary" disabled={!!busy}>{busy === 'Checking your answers…' ? 'Checking your answers…' : 'Check readiness & continue'}</button></div>
+            {feedback('quiz')}
             {lessonFeedback && <p ref={feedbackRef} tabIndex={-1} className="sm-check-feedback" role="alert">{lessonFeedback}</p>}
           </form>
           {!data.authenticated && embedded && <div className="sm-knowledge-access"><h3>Save your understanding.</h3><p>Use your existing DRMZ wallet or email sign-in.</p>{signIn || <a className="sm-primary" href="/learn/blockscholar" target="_top">Sign in in Learn →</a>}</div>}
@@ -286,13 +329,14 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
         <a className="sm-source" href="https://docs.strikefinance.org/api/trade/orders" target="_blank" rel="noreferrer">Source: Strike’s order documentation ↗</a>
       </article>
       <section ref={connectRef} tabIndex={-1} className="sm-card sm-connect-section" hidden={embedded && stage !== 1}>
-        {!embedded && <><div className="sm-step-label">02 / CONNECT</div><h2>Your testnet workspace.</h2></>}
+        {!embedded && <><div className="sm-step-label">02 / CONNECT</div><h2>Your DeFi Workspace</h2></>}
         <details className="sm-wallet-guide"><summary>New to Cardano wallets?</summary><ol><li>Create a wallet in a Cardano wallet app such as VESPR or Lace. Keep its recovery phrase private; DRMZ never asks for it.</li><li>Choose <strong>Preprod</strong> in the wallet’s network settings. Mainnet ADA is not used here.</li><li>On a phone, open this Blockscholar page inside the wallet’s browser. Sign in to the same DRMZ account to recover your progress.</li></ol><button type="button" className="sm-secondary" onClick={() => run('Copying this page…', async () => { await navigator.clipboard.writeText(window.location.href); return {...data, notice:'Page link copied. Open it in your wallet browser.'}; })}>Copy this page link</button>{data.notice && <p role="status">{data.notice}</p>}</details>
-        <p>Connect your Preprod wallet, then approve the signature to open your Strike practice account.</p>
+        <p>{loginWallet ? 'Your wallet is signed in. Authorize Strike practice to use it in this workspace. No deposit or trade is made by this approval.' : 'Choose a Cardano wallet on Preprod to authorize Strike practice.'}</p>
         {!data.builderConfigured && <div className="sm-notice"><strong>This workshop is temporarily unavailable.</strong><p>Your progress is saved. Please return later.</p></div>}
         {r.accountId && <p className="sm-success">✓ Wallet connected</p>}
-        {data.builderConfigured && !tradingSession() && <>{walletChoice}<button className="sm-primary" disabled={!!busy || !data.authenticated || tradingSession()?.publicKey === r.apiPublicKey && !!r.apiPublicKey} onClick={() => connect('builder')}>{tradingSession()?.publicKey === r.apiPublicKey && r.apiPublicKey ? 'Strike connected in this tab ✓' : r.accountId ? 'Reconnect Strike testnet' : 'Connect Strike testnet'}</button>{approvalFor('connect')}<details><summary>Connection permissions</summary><p className="sm-small">This authorizes testnet trading in this tab. Reloading may require another connection signature. No mainnet trades or builder fees.</p></details></>}
+        {data.builderConfigured && !tradingSession() && <>{walletChoice}<button className="sm-primary" hidden={!!approvalName && approvalPlace === 'connect'} disabled={!!busy || !data.authenticated} onClick={() => connect('builder')}>{tradingSession()?.publicKey === r.apiPublicKey && r.apiPublicKey ? 'Strike connected in this tab ✓' : loginWallet ? 'Enable Strike practice' : r.accountId ? 'Reconnect Strike testnet' : 'Connect Strike testnet'}</button>{approvalFor('connect')}<details><summary>Connection permissions</summary><p className="sm-small">This authorizes testnet trading in this tab. Reloading may require another connection signature. No mainnet trades or builder fees.</p></details></>}
         {!r.accountId && <details><summary>Already have a Strike testnet account?</summary>{walletChoice}<button className="sm-secondary" disabled={!!busy || !r.lessonAt} onClick={() => connect('strike')}>Verify wallet for an external order</button>{approvalFor('external')}<p>Use this route if you place and cancel the order in Strike’s own testnet interface.</p></details>}
+        {feedback('connect')}
       </section>
       <section className="sm-card sm-order-workspace" hidden={embedded && stage !== 2}>
         {!embedded && <><div className="sm-step-label">03 / INSPECT</div><h2>Observe a real order.</h2></>}
@@ -300,6 +344,8 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
           <span>Practice balance</span>
           <strong>{fundingChecked ? `${Number(funding.availableBalance).toLocaleString(undefined, { maximumFractionDigits: 2 })} test USD` : 'Not checked yet'}</strong>
           <button type="button" className="bs-text-button" disabled={!!busy} onClick={() => act({ type: 'account-check' }, 'Checking your Strike test balance…')}>Check balance</button>
+          {fundingChecked && funding.funded && <p className="sm-small">Your practice account is funded. No new deposit is needed.</p>}
+          {feedback('balance')}
         </div>}
         {fundingChecked && !funding.funded && <p className="sm-notice">Add test trading credits before placing an order. Your test-ADA bounty is separate.</p>}
         {data.builderConfigured && !completed && <div className="sm-trade"><p>Review a small ETH-USD buy limit, then place it on Strike testnet. Post-only keeps it from filling immediately.</p>{r.trade && <div className="sm-order-review"><p className="sm-step-label">ETH-USD · BUY LIMIT · POST-ONLY</p><dl><div><dt>Size</dt><dd>{r.trade.size} ETH</dd></div><div><dt>Limit price</dt><dd>{r.trade.price} test USD</dd></div><div><dt>Total exposure</dt><dd>≈ {(Number(r.trade.size) * Number(r.trade.price)).toFixed(2)} test USD</dd></div></dl><p className="sm-small">{r.trade.status === 'draft' ? 'Prepared · not submitted' : r.trade.status === 'rejected' ? 'Rejected or expired · prepare a fresh order' : 'Request sent · check actual order status'}</p></div>}
@@ -307,31 +353,41 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
           {(!r.trade || r.trade.status === 'rejected') && <button className="sm-primary" disabled={!!busy || !r.apiPublicKey} onClick={() => act({ type: 'order-prepare' }, 'Reading current testnet market rules…')}>Prepare practice order</button>}
           {r.trade?.status === 'draft' && <button className="sm-primary" disabled={!!busy || tradingSession()?.publicKey !== r.apiPublicKey} onClick={() => trade('place')}>Place reviewed testnet order</button>}
           {r.trade?.status === 'sent' && <button className="sm-secondary" disabled={!!busy} onClick={() => act({ type: 'order-check' }, 'Checking the actual order state…')}>Check order & save checkpoint</button>}
+          {feedback('order')}
           {data.notice && <p role="status">{data.notice}</p>}
           <p className="sm-small">Test funds only. Save the open-order checkpoint before canceling.</p>
         </div>}
 
         {r.order && <div className="sm-evidence"><strong>Open order observed ✓</strong><span>#{r.order.id} · {r.order.side} {r.order.size} ETH at {r.order.price} test USD</span></div>}
-        {!completed && <details open={!data.builderConfigured}><summary>Used Strike’s app? Verify your order</summary>{data.testnetApp && <a href={data.testnetApp} target="_blank" rel="noreferrer">Open Strike testnet ↗</a>}<ol className="sm-instructions"><li>On Strike <strong>testnet</strong>, choose ETH-USD and Limit. Keep total notional at or below 100 test USD.</li><li>Choose a resting price within Strike’s allowed price band, and enable post-only if available. It can still fill later; this exercise requires zero fills.</li><li>While the order is <strong>open</strong>, copy its order ID below. Save this checkpoint before canceling.</li></ol><form onSubmit={e => { e.preventDefault(); act({ type: 'observe', orderId: orderId.trim() }, 'Checking the open order with Strike…'); }}><label className="sm-field">Strike order ID<input inputMode="numeric" pattern="[1-9][0-9]*" maxLength={19} value={orderId} onChange={e => setOrderId(e.target.value)} placeholder="Order ID from Strike testnet" required disabled={!!busy || !r.accountId}/></label><button className="sm-primary" disabled={!!busy || !r.accountId || !orderId.trim()}>{r.order ? 'Check a replacement order' : 'Save open-order checkpoint'}</button></form></details>}
+        {!completed && <details open={!data.builderConfigured}><summary>Used Strike’s app? Verify your order</summary>{data.testnetApp && <a href={data.testnetApp} target="_blank" rel="noreferrer">Open Strike testnet ↗</a>}<ol className="sm-instructions"><li>On Strike <strong>testnet</strong>, choose ETH-USD and Limit. Keep total notional at or below 100 test USD.</li><li>Choose a resting price within Strike’s allowed price band, and enable post-only if available. It can still fill later; this exercise requires zero fills.</li><li>While the order is <strong>open</strong>, copy its order ID below. Save this checkpoint before canceling.</li></ol><form onSubmit={e => { e.preventDefault(); act({ type: 'observe', orderId: orderId.trim() }, 'Checking the open order with Strike…'); }}><label className="sm-field">Strike order ID<input inputMode="numeric" pattern="[1-9][0-9]*" maxLength={19} value={orderId} onChange={e => setOrderId(e.target.value)} placeholder="Order ID from Strike testnet" required disabled={!!busy || !r.accountId}/></label><button className="sm-primary" disabled={!!busy || !r.accountId || !orderId.trim()}>{r.order ? 'Check a replacement order' : 'Save open-order checkpoint'}</button>{feedback('external-order')}</form></details>}
         {embedded && replaceOrder && <button type="button" className="bs-text-button" onClick={() => setReplaceOrder(false)}>Back to cancellation</button>}
       </section>
       <section className="sm-card" hidden={embedded && stage !== 3}>
         {!embedded && <><div className="sm-step-label">04 / VERIFY</div><h2>{completed ? 'Mission accomplished.' : 'Cancel. Then confirm.'}</h2></>}
-        {completed ? <><p className="sm-success">✓ Strike reported your saved order canceled with zero fills.</p><p>Verified {new Date(r.completedAt).toLocaleString()}. Your progress is saved.</p><details><summary>Completion receipt</summary><code className="sm-hash">{r.receipt}</code><p>Verified against Strike’s testnet order history.</p></details></> : <><p>Cancel the same order below (or in Strike’s testnet interface), then verify its final state.</p><div className="sm-action-row">{r.trade?.clientId && r.order?.clientId === r.trade.clientId && <button className="sm-secondary" disabled={!!busy || tradingSession()?.publicKey !== r.apiPublicKey} onClick={() => trade('cancel')}>Cancel this testnet order</button>}<button className="sm-primary" disabled={!!busy || !r.order} onClick={() => act({ type: 'verify' }, 'Verifying cancellation with Strike…')}>Verify cancellation</button></div><p className="sm-small">If any quantity filled, resolve that test position on Strike and use a new unfilled order for this exercise.</p>{embedded && <button type="button" className="bs-text-button" disabled={!!busy} onClick={() => setReplaceOrder(true)}>Inspect a replacement order</button>}</>}
+        {!completed && r.order && <div className="sm-open-order-receipt">
+          <div className="sm-evidence" role="status" aria-live="polite"><strong>✓ Order confirmed open</strong><span>Your open-order checkpoint is saved.</span><span>#{r.order.id} · {r.order.side} {r.order.size} ETH at {r.order.price} test USD</span></div>
+          <h3>Inspect it on Strike</h3>
+          <p>Open Strike testnet with this same wallet. Find your order in Open Orders and compare its price, size and status.</p>
+          <a className="sm-secondary" href="https://testnet.strikefinance.org/" target="_blank" rel="noopener noreferrer">Review on Strike testnet ↗</a>
+          <p className="sm-small">Return to this tab to cancel and verify. A resting order can fill after this checkpoint; no new deposit is needed.</p>
+        </div>}
+        {completed ? <><p className="sm-success">✓ Strike reported your saved order canceled with zero fills.</p><p>Verified {new Date(r.completedAt).toLocaleString()}. Your progress is saved.</p><details><summary>Completion receipt</summary><code className="sm-hash">{r.receipt}</code><p>Verified against Strike’s testnet order history.</p></details></> : <><p>After reviewing, cancel this order here. If you already canceled it on Strike, go straight to Verify cancellation.</p>{connectionPanel}<div className="sm-action-row">{r.trade?.clientId && r.order?.clientId === r.trade.clientId && <button className="sm-secondary" disabled={!!busy || !r.order} onClick={() => trade('cancel')}>Cancel this testnet order</button>}<button className="sm-primary" disabled={!!busy || !r.order} onClick={() => act({ type: 'verify' }, 'Verifying cancellation with Strike…')}>Verify cancellation</button></div><p className="sm-small">If any quantity filled, resolve that test position on Strike and use a new unfilled order for this exercise.</p>{embedded && <button type="button" className="bs-text-button" disabled={!!busy} onClick={() => setReplaceOrder(true)}>Inspect a replacement order</button>}</>}
+        {feedback('verify')}
       </section>
       <section className="sm-card sm-reward" hidden={embedded && stage !== 4}>
         {!embedded && <><div className="sm-step-label">05 / CLAIM</div><h2>{paid ? 'Bounty received.' : 'A receipt for putting it into practice.'}</h2></>}
         <div className="sm-reward-number">2 <span>test ADA</span></div><p>Test ADA · one reward per eligible learner, while funding is available.</p>
         {paid ? <p className="sm-success">✓ Payment confirmed on Cardano Preprod</p> : <>
-          {r.rewardAddress ? <p>Reward wallet: <code>{short(r.rewardAddress)}</code></p> : <>{walletChoice}<button className="sm-secondary" disabled={!!busy || !completed} onClick={() => connect('reward')}>Set Preprod reward wallet</button>{approvalFor('reward')}</>}
-          <button className="sm-primary" disabled={!!busy || !completed || !r.rewardAddress || !data.reward.configured} onClick={() => act({ type: r.claim?.txHash ? 'receipt' : 'claim' }, r.claim?.txHash ? 'Checking the payment receipt…' : 'Preparing your test-ADA bounty…')}>{r.claim?.txHash ? 'Check payment' : 'Claim 2 test ADA'}</button>
+          {r.rewardAddress || data.reward.linkedAddress ? <><p>Receive in your verified Preprod wallet:<br/><code>{short(r.rewardAddress || data.reward.linkedAddress)}</code></p><p className="sm-small">DRMZ pays the fee. No additional wallet signature is needed.</p></> : <>{walletChoice}<button className="sm-secondary" disabled={!!busy || !completed} onClick={() => connect('reward')}>Set Preprod reward wallet</button>{approvalFor('reward')}</>}
+          <button className="sm-primary" disabled={!!busy || !completed || !(r.rewardAddress || data.reward.linkedAddress) || !data.reward.configured} onClick={() => act({ type: r.claim?.txHash ? 'receipt' : 'claim' }, r.claim?.txHash ? 'Checking the payment receipt…' : 'Preparing your test-ADA bounty…')}>{r.claim?.txHash ? 'Check payment' : 'Claim 2 test ADA'}</button>
           {r.claim?.txHash && <p role="status">Payment submitted. Checking for two Preprod blocks while this page is open. Your receipt is saved if you leave.</p>}
           {!data.reward.configured && <p className="sm-notice">The bounty campaign is awaiting sponsor setup. You can save a lesson pass now; payout is not available yet.</p>}
         </>}
+        {feedback('reward')}
         {r.claim?.txHash && <a className="sm-secondary" href={`https://preprod.cardanoscan.io/transaction/${r.claim.txHash}`} target="_blank" rel="noreferrer">View bounty transaction ↗</a>}
         <details><summary>How verification and rewards work</summary><p>Complete and verify an unfilled order and its cancellation to claim your reward on Cardano Preprod.</p><p>One reward per linked account and wallet. Test ADA has no monetary value.</p></details>
       </section>
-      {data.authenticated && (r.accountId || data.previousAttempts?.length > 0) && <details className="sm-account-settings"><summary>Practice wallet & saved attempts</summary>{r.accountId && stage !== 5 && <button type="button" className="sm-secondary" disabled={!!busy} onClick={() => setReviewSetup(true)}>Review wallet & funding</button>}<p>Your DRMZ sign-in and lessons stay saved when you change practice wallets.</p>{r.wallet && <p>Current practice wallet: <code>{short(r.wallet)}</code></p>}{r.accountId && <button type="button" className="sm-secondary" disabled={!!busy} onClick={() => setShowRestart(true)}>Use a different practice wallet</button>}{showRestart && <div className="sm-setup-step"><h3>Start a fresh testnet attempt?</h3><p>Your old deposit receipts and practice account will be saved below. Funds stay in the original wallet and Strike account; they do not move to the new one. Your lessons stay complete.</p><div className="sm-action-row"><button type="button" className="sm-primary" disabled={!!busy} onClick={() => switchAttempt()}>Save old practice & start fresh</button><button type="button" className="sm-secondary" disabled={!!busy} onClick={() => setShowRestart(false)}>Keep current practice</button></div></div>}{data.previousAttempts?.map(attempt => <div className="sm-setup-step" key={attempt.id}><p>Saved practice · <code>{short(attempt.wallet)}</code>{attempt.creditedUsd ? ` · ${Number(attempt.creditedUsd).toFixed(2)} test USD credited` : ''}</p><div className="sm-action-row"><button type="button" className="sm-secondary" disabled={!!busy} onClick={() => switchAttempt(attempt.id)}>Restore this practice</button>{attempt.depositTx && <a href={`https://preprod.cardanoscan.io/transaction/${attempt.depositTx}`} target="_blank" rel="noreferrer">Deposit receipt ↗</a>}</div></div>)}</details>}
+      {data.authenticated && (r.accountId || data.previousAttempts?.length > 0) && <details className="sm-account-settings"><summary>Practice wallet & saved attempts</summary>{r.accountId && stage !== 5 && <button type="button" className="sm-secondary" disabled={!!busy} onClick={() => setReviewSetup(true)}>Review wallet & funding</button>}<p>Your DRMZ sign-in and lessons stay saved when you change practice wallets.</p>{r.wallet && <p>Current practice wallet: <code>{short(r.wallet)}</code></p>}{r.accountId && <button type="button" className="sm-secondary" disabled={!!busy} onClick={() => setShowRestart(true)}>Use a different practice wallet</button>}{showRestart && <div className="sm-setup-step"><h3>Start a fresh testnet attempt?</h3><p>Your old deposit receipts and practice account will be saved below. Funds stay in the original wallet and Strike account; they do not move to the new one. Your lessons stay complete.</p><div className="sm-action-row"><button type="button" className="sm-primary" disabled={!!busy} onClick={() => switchAttempt()}>Save old practice & start fresh</button><button type="button" className="sm-secondary" disabled={!!busy} onClick={() => setShowRestart(false)}>Keep current practice</button></div></div>}{data.previousAttempts?.map(attempt => <div className="sm-setup-step" key={attempt.id}><p>Saved practice · <code>{short(attempt.wallet)}</code>{attempt.creditedUsd ? ` · ${Number(attempt.creditedUsd).toFixed(2)} test USD credited` : ''}</p><div className="sm-action-row"><button type="button" className="sm-secondary" disabled={!!busy} onClick={() => switchAttempt(attempt.id)}>Restore this practice</button>{attempt.depositTx && <a href={`https://preprod.cardanoscan.io/transaction/${attempt.depositTx}`} target="_blank" rel="noreferrer">Deposit receipt ↗</a>}</div></div>)}{feedback('account')}</details>}
       </div>
       </>}
     </>}

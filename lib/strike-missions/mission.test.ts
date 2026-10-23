@@ -5,14 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import * as CSL from '@emurgo/cardano-serialization-lib-nodejs';
 import * as CMS from '@emurgo/cardano-message-signing-nodejs';
-import { MISSION, publicQuestions, type MissionRecord } from './model';
+import { MISSION, publicQuestions, publicRecord, type MissionRecord } from './model';
 import { validateOrder, orderFor } from './strike';
 import { missionAction, status, testnetApp } from './service';
-import { acquireSponsor, getRecord, releaseSponsor, reserveClaim, updateRecord, switchPracticeAttempt, practiceHistory, previousPracticeGrant, campaignStats, acquireSetup, releaseSetup } from './store';
+import { acquireSponsor, getRecord, releaseSponsor, reserveClaim, updateRecord, switchPracticeAttempt, practiceHistory, previousPracticeGrant, campaignStats, paymentOutboxes, acquireSetup, releaseSetup } from './store';
 import { buildBounty, claimBounty, sponsorFile } from './bounty';
 import { GET, POST } from '../../app/api/learn/strike-mission/route';
 import { buildUser, createAppSessionToken } from '../../app/api/lib/auth-session';
 import { newStrikeSession, signTestOrder, connectionAddress, walletRequest, inspectWalletAccount, assertWalletAccount } from '../../packages/spaces-studio/src/strike-session.mjs';
+import { linkedRewardAddress, ensureRewardWallet } from './reward-wallet';
+import { paymentIdentity } from '../auth/cardano-proof';
 import { builderFailure, planOrder } from './trading';
 
 const account = '019a0c2e-1111-7000-8000-000000000001';
@@ -20,6 +22,51 @@ const now = Date.now();
 const open = { ID: '12345', AccountID: account, Symbol: 'ETH-USD', Status: 'open', Side: 'buy', Type: 'limit', Size: '0.02', Price: '2300', Filled: '0', CreateTimestamp: now, EventTimestamp: now };
 const params = { min_fee_a: 44, min_fee_b: 155381, coins_per_utxo_size: '4310', pool_deposit: '500000000', key_deposit: '2000000', max_val_size: '5000', max_tx_size: 16384 };
 const wallet = () => { const secret = CSL.PrivateKey.generate_ed25519(); return { secret, address: CSL.EnterpriseAddress.new(0, CSL.Credential.from_keyhash(secret.to_public().hash())).to_address() }; };
+test('field-note bonus requires both milestones and pays exactly three test ADA once, including after an interrupted response', async t => {
+  setup(t); const sponsor = wallet(), recipient = wallet();
+  fs.writeFileSync(sponsorFile(), JSON.stringify({ purpose: MISSION, network: 'preprod', key: sponsor.secret.to_hex() }), { mode: 0o600 });
+  updateRecord('bonus', r => { r.completedAt = now; r.rewardAddress = recipient.address.to_bech32(); });
+  await assert.rejects(claimBounty('bonus', 'fieldNoteClaim'), /Save your field note/);
+  updateRecord('bonus', r => { r.claim = { id: 'original', status: 'confirmed', txHash: 'b'.repeat(64), fee: 170000 }; });
+  assert.throws(() => reserveClaim('bonus', 'fieldNoteClaim'), /Save your field note/);
+  updateRecord('bonus', r => { r.blockscholar = { enrolledAt: now, reflection: { learning: 'I checked the zero-fill cancellation evidence.', application: 'I can apply evidence verification to workplace tasks.', artifactUrl: '', savedAt: now } }; });
+  const original = getRecord('bonus').claim;
+  let accepted = false, outputAmount = '2000000'; const broadcasts: string[] = [];
+  global.fetch = async (input, init) => {
+    const url = new URL(String(input)); assert.equal(url.origin, 'https://cardano-preprod.blockfrost.io');
+    if (url.pathname.endsWith('/tx/submit')) {
+      broadcasts.push(Buffer.from(init!.body as Uint8Array).toString('hex')); accepted = true;
+      throw new Error('Synthetic timeout after acceptance');
+    }
+    if (url.pathname.endsWith('/parameters')) return Response.json(params);
+    if (url.pathname.endsWith('/blocks/latest')) return Response.json({ slot: 1000, height: 22 });
+    if (url.pathname.includes('/addresses/')) return Response.json([{ tx_hash: 'a'.repeat(64), output_index: 0, amount: [{ unit: 'lovelace', quantity: '10000000' }] }]);
+    if (url.pathname.endsWith('/utxos')) return Response.json({ outputs: [{ address: recipient.address.to_bech32(), amount: [{ unit: 'lovelace', quantity: outputAmount }] }] });
+    if (url.pathname.includes('/txs/')) return accepted ? Response.json({ hash: getRecord('bonus').fieldNoteClaim!.txHash, valid_contract: true, block_height: 20 }) : new Response('', { status: 404 });
+    throw new Error('Unexpected fixture URL');
+  };
+  await assert.rejects(claimBounty('bonus', 'fieldNoteClaim'), /acknowledged/);
+  const pending = getRecord('bonus').fieldNoteClaim!;
+  const tx = CSL.Transaction.from_hex(pending.signedTx!);
+  assert.equal(tx.body().outputs().get(0).amount().coin().to_str(), '3000000');
+  assert.equal(tx.body().outputs().get(0).address().to_bech32(), recipient.address.to_bech32());
+  assert.ok(paymentOutboxes().includes(pending.signedTx!));
+  assert.equal(publicRecord(getRecord('bonus')).fieldNoteClaim!.signedTx, undefined);
+  assert.throws(() => acquireSponsor('other'), /Another bounty/);
+  await assert.rejects(claimBounty('bonus', 'fieldNoteClaim'), /expected bounty/);
+  outputAmount = '3000000';
+  await claimBounty('bonus', 'fieldNoteClaim');
+  updateRecord('bonus', r => { r.blockscholar!.reflection!.learning = 'Edited field note still describing verified evidence.'; });
+  await claimBounty('bonus', 'fieldNoteClaim');
+  assert.equal(broadcasts.length, 1);
+  assert.equal(getRecord('bonus').fieldNoteClaim!.status, 'confirmed');
+  assert.deepEqual(getRecord('bonus').claim, original);
+  const savedBonus = getRecord('bonus');
+  updateRecord('duplicate', r => { const saved = savedBonus; r.completedAt = now; r.rewardAddress = saved.rewardAddress; r.claim = saved.claim; r.blockscholar = saved.blockscholar; });
+  assert.throws(() => reserveClaim('duplicate', 'fieldNoteClaim'), /already has a bounty/);
+  assert.equal(campaignStats().fieldNoteClaimsPaid, 1);
+  assert.equal(campaignStats().payments.find(p => p.txHash === pending.txHash)?.amountLovelace, 3000000);
+});
 test('reconnect signs the saved identity even when a wallet rotates its change address',async()=>{
   const old=wallet().address.to_bech32(), changed=wallet().address.to_hex(), practice=wallet().address.to_bech32();let reads=0;
   const api={getChangeAddress:async()=>{reads++;return changed;}};
@@ -178,7 +225,8 @@ test('real CIP-8 ownership, single-use challenges, server verification and durab
   rawOrder.Status = 'canceled';
   const completed = await missionAction('alice', { type: 'verify' }, origin);
   assert.ok(completed.record?.completedAt); assert.match(completed.record!.receipt!, /^[a-f0-9]{64}$/);
-  await assert.rejects(missionAction('alice', { type: 'claim' }, origin), /Preprod reward wallet/);
+  await assert.rejects(missionAction('alice', { type: 'claim' }, origin), /sponsor setup/);
+  assert.equal(getRecord('alice').rewardAddress,w.address.to_bech32());
   const reward = await missionAction('alice', { type: 'challenge', purpose: 'reward', address: w.address.to_bech32() }, origin);
   if (!('challenge' in reward)) throw new Error('challenge');
   await missionAction('alice', { type: 'link', proof: signature(w, reward.challenge.hex) }, origin);
@@ -260,7 +308,7 @@ test('API keeps existing auth, isolates users, rejects CSRF/oversize and preserv
 for (const fundedPractice of [false, true]) test(`official builder lifecycle preserves evidence and prevents duplicate orders (funded practice: ${fundedPractice})`, async t => {
   setup(t); process.env.STRIKE_MISSIONS_BUILDER_CODE = 'drmz-test-fixture';
   const w = wallet(), session = newStrikeSession(), origin = 'http://localhost:3000';
-  let order: Record<string, unknown> | null = null, creates = 0, builderMessage = '';
+  let order: Record<string, unknown> | null = null, creates = 0, cancels = 0, builderMessage = '';
   const market = { status: 'trading', mark_price: '2393.15512209', order_min_price: '39.86', order_max_price: '100000', order_tick_price: '0.01', order_limit_price_bound: '0.05', order_limit_step_size: '0.001', order_limit_min_size: '0.001', order_market_min_size: '0.001', order_limit_max_size: '100', order_min_notional: '10' };
   global.fetch = async (input, init) => {
     const u = new URL(String(input)); assert.equal(u.origin, 'https://api-v2-testnet.strikefinance.org');
@@ -280,7 +328,7 @@ for (const fundedPractice of [false, true]) test(`official builder lifecycle pre
       throw new Error('Synthetic accepted order with interrupted response');
     }
     if (u.pathname === '/v2/order/cancel') {
-      assert.equal(init?.method, 'DELETE'); assert.equal(JSON.parse(String(init?.body)).client_order_id, order?.ClientOrderID);
+      cancels++; assert.equal(init?.method, 'DELETE'); assert.equal(JSON.parse(String(init?.body)).client_order_id, order?.ClientOrderID);
       order!.Status = 'canceled'; order!.EventTimestamp = Date.now();
       // Open-order and history responses can serialize the same values differently.
       order!.Price = `${order!.Price}000000000000`; order!.Size = `${order!.Size}000000000000`; order!.Filled = '0.000000000000000000';
@@ -315,6 +363,9 @@ for (const fundedPractice of [false, true]) test(`official builder lifecycle pre
   await assert.rejects(missionAction('builder-user', { type: 'verify' }, origin), /Cancel/);
   const body = JSON.stringify({ symbol: 'ETH-USD', client_order_id: planned.clientId });
   await missionAction('builder-user', { type: 'trade-submit', operation: 'cancel', headers: signTestOrder(session, 'cancel', body, Date.now()) }, origin);
+  assert.ok(getRecord('builder-user').completedAt); // Final status is read after the cancellation.
+  await missionAction('builder-user', { type: 'trade-submit', operation: 'cancel', headers: signTestOrder(session, 'cancel', body, Date.now()) }, origin);
+  assert.equal(cancels,1); // Repeated clicks never resend an already verified cancellation.
   await missionAction('builder-user', { type: 'verify' }, origin); assert.ok(getRecord('builder-user').completedAt);
   assert.equal(getRecord('builder-user').workshopAccountId,account);assert.equal(status('builder-user').record?.accountId,account);
   assert.ok(!JSON.stringify(status('builder-user')).includes(Buffer.from(session.privateKey).toString('hex')));
@@ -410,4 +461,56 @@ test('legacy mainnet mission gets an independently verified Preprod setup withou
   assert.equal(balance.funding.accountId,practiceAccount);
   await assert.rejects(missionAction('legacy-learner',{type:'builder-challenge',context:'practice',address:wallet().address.to_hex(),publicKey:session.publicKey},'http://localhost:3000'),/already linked/);
   assert.equal(challenges,1);
+});
+
+test('Strike account/order reads retry one transient outage without losing int64 order IDs',async(t)=>{
+ const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});let calls=0;
+ globalThis.fetch=async(_url,init)=>{assert.equal(init?.method,undefined);calls++;if(calls===1)throw new TypeError('fetch failed');return new Response('{"ID":9223372036854775807}');};
+ const result=await orderFor('test-address','9223372036854775807');
+ assert.equal(result.ID,'9223372036854775807');assert.equal(calls,2);
+});
+test('Strike lookup retries are bounded and do not retry missing records',async(t)=>{
+ const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});let calls=0;
+ globalThis.fetch=async()=>{calls++;return new Response('',{status:503});};
+ await assert.rejects(()=>orderFor('test-address','123'),/unavailable/);assert.equal(calls,2);
+ calls=0;globalThis.fetch=async()=>{calls++;return new Response('',{status:404});};
+ await assert.rejects(()=>orderFor('test-address','123'),/not found/);assert.equal(calls,1);
+});
+
+for (const outcome of ['already-canceled','canceled-despite-error','canceled-despite-timeout','partial-cancel']) test(`cancellation reconciliation: ${outcome}`,async t=>{
+ setup(t);process.env.STRIKE_MISSIONS_BUILDER_CODE='fixture';const w=wallet(),session=newStrikeSession();let deletes=0;
+ let raw={...open,ClientOrderID:'saved-order',Status:outcome==='already-canceled'||outcome==='partial-cancel'?'canceled':'open',Filled:outcome==='partial-cancel'?'0.001':'0'};
+ updateRecord('cancel-user',r=>Object.assign(r,{lessonAt:now-1000,wallet:w.address.to_bech32(),accountId:account,apiPublicKey:session.publicKey,trade:{clientId:'saved-order',body:'{}',price:open.Price,size:open.Size,status:'sent'},order:{id:String(open.ID),clientId:'saved-order',accountId:account,price:open.Price,size:open.Size,side:open.Side,createdAt:now,observedAt:now}}));
+ global.fetch=async(input,init)=>{
+  const u=new URL(String(input));
+  if(u.pathname==='/v2/order')return Response.json(raw);
+  if(u.pathname==='/v2/order/cancel'){deletes++;assert.equal(init?.method,'DELETE');raw={...raw,Status:'canceled'};if(outcome==='canceled-despite-timeout')throw new TypeError('connection interrupted');return Response.json({error:'already canceled'},{status:400});}
+  throw new Error('Unexpected request');
+ };
+ const body=JSON.stringify({symbol:'ETH-USD',client_order_id:'saved-order'});
+ const action={type:'trade-submit',operation:'cancel',headers:signTestOrder(session,'cancel',body,Date.now())};
+ if(outcome==='partial-cancel'){
+  await assert.rejects(missionAction('cancel-user',action,'http://localhost:3000'),/unfilled/);assert.equal(getRecord('cancel-user').completedAt,undefined);assert.equal(deletes,0);
+ }else{
+  const result=await missionAction('cancel-user',action,'http://localhost:3000');assert.ok(result.record?.completedAt);
+  assert.equal(deletes,outcome==='already-canceled'?0:1);
+  await missionAction('cancel-user',action,'http://localhost:3000');assert.equal(deletes,outcome==='already-canceled'?0:1);
+ }
+});
+
+test('bounty defaults only to the mission’s previously verified Preprod wallet and preserves existing claims',t=>{
+ setup(t);const w=wallet(),address=w.address.to_bech32(),identity=paymentIdentity(address,'preprod');
+ updateRecord('reward-user',r=>Object.assign(r,{accountId:account,wallet:address,walletKey:identity.ownerKeyHash,completedAt:now}));
+ assert.equal(status('reward-user').reward.linkedAddress,address);
+ ensureRewardWallet('reward-user');assert.equal(getRecord('reward-user').rewardAddress,address);assert.equal(getRecord('reward-user').rewardKey,identity.ownerKeyHash);
+ assert.equal(linkedRewardAddress({...getRecord('reward-user'),walletKey:'wrong-key'}),null);
+ assert.equal(linkedRewardAddress({...getRecord('reward-user'),walletKey:undefined}),null);
+ const mainnet=CSL.EnterpriseAddress.new(1,CSL.Credential.from_keyhash(w.secret.to_public().hash())).to_address().to_bech32();
+ assert.equal(linkedRewardAddress({...getRecord('reward-user'),wallet:mainnet}),null);
+ updateRecord('unverified',r=>Object.assign(r,{accountId:account,wallet:address,completedAt:now}));
+ assert.throws(()=>ensureRewardWallet('unverified'),/Verify a Preprod/);
+ updateRecord('incomplete',r=>Object.assign(r,{accountId:account,wallet:address,walletKey:identity.ownerKeyHash}));
+ assert.throws(()=>ensureRewardWallet('incomplete'),/Complete/);
+ const other=wallet().address.to_bech32();updateRecord('reward-user',r=>{r.rewardAddress=other;r.claim={id:'existing-claim',status:'confirmed'};});
+ ensureRewardWallet('reward-user');assert.equal(getRecord('reward-user').rewardAddress,other);
 });

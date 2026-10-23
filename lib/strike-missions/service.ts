@@ -1,13 +1,15 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import * as CSL from '@emurgo/cardano-serialization-lib-nodejs';
 import { paymentIdentity, verifyBadgeWalletSignature } from '../auth/cardano-proof';
-import { actionSchema, practiceRecord, workshopRecord, grade, MISSION, MissionError, publicQuestions, publicRecord, REWARD } from './model';
+import { actionSchema, practiceRecord, workshopRecord, grade, MISSION, MissionError, publicQuestions, publicRecord, REWARD, FIELD_NOTE_REWARD } from './model';
 import { getRecord, rateLimit, updateRecord, practiceHistory, switchPracticeAttempt, previousPracticeGrant, acquireSetup, releaseSetup } from './store';
 import { accountFor, accountFunding, orderFor, orderForClient, validateOrder, STRIKE_TESTNET_APP } from './strike';
 import { claimBounty, sponsorStatus } from './bounty';
 import { builderCode, tradingAction } from './trading';
 import { practiceStatus, fundPractice } from './practice-funding';
 import { depositAction } from './deposit';
+import { ensureRewardWallet, linkedRewardAddress } from './reward-wallet';
+import { saveVerifiedCancellation } from './cancellation';
 import {positionAction,positionScenarios} from './positions';
 
 export function enabled() { return process.env.STRIKE_MISSIONS_ENABLED === undefined ? process.env.NODE_ENV !== 'production' : process.env.STRIKE_MISSIONS_ENABLED === 'true'; }
@@ -25,7 +27,7 @@ export function status(actor?: string) {
     previousAttempts: active && actor ? practiceHistory(actor) : [],
     previousGrant: saved && actor && practiceRecord(saved).wallet ? previousPracticeGrant(actor,practiceRecord(saved).wallet!,practiceRecord(saved).accountId) : false,
     practiceSponsor: active ? practiceStatus() : {configured: false, address: null},
-    reward: { lovelace: REWARD, unit: 'Preprod test ADA', limit: 20, ...(active ? sponsorStatus() : { configured: false, address: null, network: 'preprod' }) }, testnetApp: active ? testnetApp() : null, builderConfigured: active && !!builderCode() };
+    reward: { linkedAddress: linkedRewardAddress(saved), lovelace: REWARD, fieldNoteLovelace: FIELD_NOTE_REWARD, unit: 'Preprod test ADA', limit: 20, ...(active ? sponsorStatus() : { configured: false, address: null, network: 'preprod' }) }, testnetApp: active ? testnetApp() : null, builderConfigured: active && !!builderCode() };
 }
 export async function missionAction(actor: string, body: unknown, origin: string) {
   if (!enabled()) throw new MissionError('This testnet mission has not been enabled on this deployment.', 503);
@@ -124,21 +126,22 @@ export async function missionAction(actor: string, body: unknown, origin: string
     const id = automated ? String(raw?.ID || '') : a.type === 'observe' ? a.orderId : r.order?.id;
     if (!id) throw new MissionError('Save an open-order checkpoint first.');
     const o = validateOrder(raw || await orderFor(r.wallet, id), r, id, phase);
-    updateRecord(actor, (latest, bind) => {
+    if (phase === 'canceled') saveVerifiedCancellation(actor, o);
+    else updateRecord(actor, (latest, bind) => {
       if (latest.completedAt) return;
       if (phase === 'open') {
         if (workshopRecord(latest).accountId !== r.accountId) throw new MissionError('The workshop account changed. Check the saved order again.', 409);
         bind('order', `${r.accountId}:${id}`);
         latest.workshopAccountId = r.accountId;
         latest.order = { id, accountId: o.AccountID, price: o.Price, size: o.Size, side: o.Side, createdAt: o.CreateTimestamp, observedAt: Date.now(), ...(automated ? { clientId: r.trade!.clientId } : {}) };
-      } else {
-        validateOrder(o, workshopRecord(latest), id, 'canceled');
-        latest.completedAt = Date.now();
-        latest.receipt = createHash('sha256').update(JSON.stringify({ mission: MISSION, network: 'strike-testnet', account: workshopRecord(latest).accountId, open: latest.order, canceled: o, verifiedAt: latest.completedAt })).digest('hex');
       }
     });
+  } else if (a.type === 'field-note-claim' || a.type === 'field-note-receipt') {
+    if (a.type === 'field-note-receipt' && !getRecord(actor).fieldNoteClaim?.signedTx) throw new MissionError('No field-note payment has been submitted yet.');
+    await claimBounty(actor, 'fieldNoteClaim');
   } else if (a.type === 'claim' || a.type === 'receipt') {
     if (a.type === 'receipt' && !getRecord(actor).claim?.signedTx) throw new MissionError('No payment has been submitted yet.');
+    if (a.type === 'claim') ensureRewardWallet(actor);
     await claimBounty(actor);
   }
   return status(actor);

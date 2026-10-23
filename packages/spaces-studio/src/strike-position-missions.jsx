@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 
-export function StrikePositionMissions({data,busy,act,submit,connected,connection}) {
+export function StrikePositionMissions({data,busy,act,submit,connected,connection,feedback = null}) {
   const [direction,setDirection]=useState(()=>data.record?.positions?.short?.entry?.sentAt && !data.record?.positions?.short?.completedAt || data.record?.positions?.long?.completedAt && !data.record?.positions?.short?.completedAt ? 'short':'long'),[answers,setAnswers]=useState({});
   const r=data.record,p=r?.positions?.[direction],scenario=data.positionScenarios?.[direction];
   const entry=p?.entry,exit=p?.exits?.at(-1),complete=!!p?.completedAt;
@@ -58,6 +58,7 @@ export function StrikePositionMissions({data,busy,act,submit,connected,connectio
         <div className="sm-action-row"><button type="button" className="sm-secondary" disabled={!!busy} onClick={check}>{paused?'Check liquidity again':'Check status & save progress'}</button></div>
         <details><summary>If you leave or something changes</summary><p>Return using the same DRMZ sign-in and wallet. Reconnect only to authorize a new trade; status checks need no wallet approval. Do not trade ETH elsewhere while a mission is running. If the position changes outside DRMZ, review it in Strike testnet before continuing.</p><a href="https://testnet.strikefinance.org" target="_blank" rel="noreferrer">Open Strike testnet ↗</a></details>
       </>}
+      {feedback}
     </article>}
   </section>;
 }

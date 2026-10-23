@@ -108,9 +108,9 @@ test('fund shows actual funding capacity, aggregate outcomes and confirmed recei
     return Response.json([{ tx_hash: 'b'.repeat(64), output_index: 0, amount: [{ unit: 'lovelace', quantity: '10000000' }] }]);
   };
   const fund = await dreamFund(); if (!('stats' in fund)) throw new Error('disabled');
-  assert.equal(fund.address, wallet.address.to_bech32()); assert.equal(fund.estimatedFundedClaims, 4);
+  assert.equal(fund.address, wallet.address.to_bech32()); assert.equal(fund.estimatedFundedClaims, 1);
   assert.equal(fund.maximumClaims, 20); assert.equal(fund.remainingClaims, 19); assert.equal(fund.paidLovelace, 2000000);
-  assert.equal(fund.verifiedUnpaidLovelace, 2000000); assert.equal(fund.stats.feesPaidLovelace, 170000);
+  assert.equal(fund.verifiedUnpaidLovelace, 5000000); assert.equal(fund.stats.feesPaidLovelace, 170000);
   assert.equal(fund.stats.enrolled, 1); assert.equal(fund.stats.fieldNotes, 1);
   const publicBody = JSON.stringify(await (await fundGET()).json());
   for (const secret of [wallet.secret.to_hex(), notes.learning, notes.artifactUrl, 'PRIVATE-WALLET', 'PRIVATE-ACCOUNT', 'signedTx', 'actor']) assert.ok(!publicBody.includes(secret));
@@ -122,6 +122,14 @@ test('failed network balance remains unknown; disabled deployments never read th
   assert.equal(fund.fundingStatus, 'unavailable'); assert.equal(fund.balance, null); assert.equal(fund.estimatedFundedClaims, null);
   process.env.STRIKE_MISSIONS_ENABLED = 'false'; process.env.STRIKE_MISSIONS_DATA_DIR = '/not-a-writable-test-path';
   assert.deepEqual(await dreamFund(), { enabled: false });
+});
+test('a nearly depleted sponsor is not advertised as funding a complete program', async t => {
+  setup(t); sponsor();
+  global.fetch = async () => Response.json([{ tx_hash: 'b'.repeat(64), output_index: 0, amount: [{ unit: 'lovelace', quantity: '3497953' }] }]);
+  const fund = await dreamFund(); if (!('stats' in fund)) throw new Error('disabled');
+  assert.equal(fund.fundingStatus, 'needs-funding');
+  assert.equal(fund.estimatedFundedClaims, 0);
+  assert.equal(fund.changeReserveLovelace, 1000000);
 });
 test('fund capacity excludes token-bearing outputs and inputs locked by a saved payout', t => {
   setup(t); const wallet = sponsor();

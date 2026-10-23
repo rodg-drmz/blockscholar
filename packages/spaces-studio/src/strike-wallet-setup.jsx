@@ -1,6 +1,6 @@
 import React from 'react';
 
-export function StrikeWalletSetup({data, busy, connected, walletControls, funding, act, deposit, signDeposit, reconnect, approval = null, checkState = {}}) {
+export function StrikeWalletSetup({data, busy, connected, walletControls, funding, act, deposit, signDeposit, reconnect, approval = null, checkState = {}, feedback = null}) {
   const r = data.record || {}, d = r.deposit, grant = r.practiceGrant;
   const practice = r.practiceConnection || r;
   const ready = !!practice.accountId && practice.wallet?.startsWith('addr_test1');
@@ -8,9 +8,10 @@ export function StrikeWalletSetup({data, busy, connected, walletControls, fundin
   const signed = ['submitted', 'registered', 'verified'].includes(d?.status);
   const available = !!practice.accountId && !!funding && funding.accountId === practice.accountId && funding.funded;
   const paymentConfirmed = !!d?.chainConfirmedAt;
+  const settling = paymentConfirmed && d?.settlementStatus === 'pending_settlement';
   const failed = ['failed', 'cancelled'].includes(d?.settlementStatus);
   const needsConnection = !connected && !verified && (!signed || d?.status === 'submitted');
-  const heading = !ready ? 'Connect your practice wallet.' : verified ? 'Ready to practice.' : failed ? 'Deposit needs attention.' : signed ? paymentConfirmed ? 'Waiting for Strike credit.' : 'Confirming your deposit.' : available ? 'Your trading balance is ready.' : 'Fund your practice wallet.';
+  const heading = !ready ? 'Connect your practice wallet.' : verified ? 'Ready to practice.' : failed ? 'Deposit needs attention.' : signed ? settling ? 'Strike is settling your deposit.' : paymentConfirmed ? 'Waiting for Strike credit.' : 'Confirming your deposit.' : available ? 'Your trading balance is ready.' : 'Fund your practice wallet.';
   const details = d && <dl className="sm-deposit-review">
     <div><dt>Deposit</dt><dd>100 Preprod test ADA</dd></div>
     <div><dt>Estimated trading credit</dt><dd>{d.usdValue} test USD</dd></div>
@@ -30,7 +31,7 @@ export function StrikeWalletSetup({data, busy, connected, walletControls, fundin
     {needsConnection && <div className="sm-setup-step sm-setup-connector">
       <p>{ready ? 'Reconnect to authorize the next step.' : 'Choose a Cardano wallet on Preprod.'}</p>
       {walletControls}
-      <button type="button" className="sm-primary" disabled={!!busy} onClick={reconnect}>{ready ? 'Reconnect wallet' : 'Connect Preprod wallet'}</button>
+      <button type="button" className="sm-primary" hidden={!!approval} disabled={!!busy} onClick={reconnect}>{ready ? 'Reconnect wallet' : 'Connect Preprod wallet'}</button>
       {approval}
     </div>}
     {ready && available && !signed && <div className="sm-setup-step">
@@ -39,7 +40,9 @@ export function StrikeWalletSetup({data, busy, connected, walletControls, fundin
     </div>}
     {ready && (verified ? <p className="sm-success">✓ {d.creditedUsd} test USD credited</p> : signed ? <div className="sm-setup-step sm-deposit-status" aria-live="polite">
       <p className={paymentConfirmed ? 'sm-success' : ''}>{paymentConfirmed ? '✓ Deposit confirmed on Cardano' : 'Waiting for Cardano confirmation…'}</p>
-      <p>{failed ? 'Strike reported a settlement issue. Keep your receipt and contact support before making another deposit.' : paymentConfirmed ? 'Strike is processing your trading credit. The workshop opens when it is verified.' : 'Your signed deposit is saved. No further payment is needed.'}</p>
+      <p>{failed ? 'Strike reported a settlement issue. Keep your receipt and contact support before making another deposit.' : settling ? 'Your payment arrived. Strike’s deposit receipt is still pending settlement; step 3 opens automatically when that receipt is finalized.' : paymentConfirmed ? 'Your payment arrived. Waiting for Strike to confirm the matching trading credit.' : 'Your signed deposit is saved. No further payment is needed.'}</p>
+      {paymentConfirmed && !failed && available && <p className="sm-small">Strike reports {Number(funding.availableBalance).toLocaleString(undefined,{maximumFractionDigits:6})} test USD available. An available balance does not yet confirm this deposit’s final settlement.</p>}
+      {paymentConfirmed && !failed && <p className="sm-small">No additional deposit or signature is needed. You can return to this saved step later.</p>}
       <p className="sm-small">{checkState.checking ? 'Checking your receipt…' : checkState.checkedAt ? `Last checked ${new Date(checkState.checkedAt).toLocaleTimeString()}` : 'Checking automatically while this page is open.'}</p>
       {checkState.warning && <p className="sm-check-feedback" role="status">{checkState.warning}</p>}
       <div className="sm-action-row">
@@ -67,6 +70,7 @@ export function StrikeWalletSetup({data, busy, connected, walletControls, fundin
       </div>
       <details><summary>Already have a Strike balance?</summary><button className="sm-secondary" disabled={!!busy} onClick={() => act({type:'account-check'}, 'Checking your balance…')}>Check existing balance</button></details>
     </>)}
+    {feedback}
     <details className="sm-setup-receipts"><summary>Wallet & receipts</summary>
       {ready && <p className="sm-small">Preprod · <code>{practice.wallet.slice(0,16)}…{practice.wallet.slice(-8)}</code></p>}
       {signed && details}

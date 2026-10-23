@@ -1,7 +1,7 @@
 import * as CSL from '@emurgo/cardano-serialization-lib-nodejs';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { MissionError, REWARD, PRACTICE_GRANT } from './model';
+import { MissionError, REWARD, FIELD_NOTE_REWARD, PRACTICE_GRANT, type ClaimKind } from './model';
 import { acquireSponsor, dataDir, getRecord, paymentOutboxes, releaseSponsor, reserveClaim, withSponsorLease } from './store';
 
 export const sponsorFile = () => path.join(dataDir(), 'sponsor.preprod.json');
@@ -71,8 +71,8 @@ export function summarizeSponsorUtxos(inputs: Utxo[], outboxes: string[]) {
   return { balanceLovelace, spendableLovelace };
 }
 export type Params = { min_fee_a: number; min_fee_b: number; coins_per_utxo_size: string; pool_deposit: string; key_deposit: string; max_val_size: string; max_tx_size: number };
-export function buildBounty(address: string, inputs: Utxo[], params: Params, slot: number, wallet = sponsorWallet(), amount: typeof REWARD | typeof PRACTICE_GRANT = REWARD) {
-  if (amount !== REWARD && amount !== PRACTICE_GRANT) throw new MissionError('Unsupported test payment amount.');
+export function buildBounty(address: string, inputs: Utxo[], params: Params, slot: number, wallet = sponsorWallet(), amount: typeof REWARD | typeof FIELD_NOTE_REWARD | typeof PRACTICE_GRANT = REWARD) {
+  if (amount !== REWARD && amount !== FIELD_NOTE_REWARD && amount !== PRACTICE_GRANT) throw new MissionError('Unsupported test payment amount.');
   const recipient = CSL.Address.from_bech32(address);
   if (recipient.network_id() !== 0) throw new MissionError('Bounties are test ADA on Preprod only.');
   const n = (v: string | number) => CSL.BigNum.from_str(String(v));
@@ -93,16 +93,18 @@ export function buildBounty(address: string, inputs: Utxo[], params: Params, slo
     const fixed = CSL.FixedTransaction.from_hex(tx.to_hex());
     fixed.add_vkey_witness(CSL.make_vkey_witness(fixed.transaction_hash(), wallet.secret));
     return { txHash: fixed.transaction_hash().to_hex(), signedTx: fixed.to_hex(), fee, expiresSlot: slot + 1800 };
-  } catch { throw new MissionError('The mission sponsor needs spendable Preprod test ADA. Your completion is saved; no fee was charged.', 503); }
+  } catch { throw new MissionError('The mission sponsor needs more spendable Preprod test ADA to cover the reward, network fee, and required change output. Your completion is saved; no fee was charged.', 503); }
 }
-export async function claimBounty(actor: string) {
+export async function claimBounty(actor: string, kind: ClaimKind = 'claim') {
+  const amount = kind === 'fieldNoteClaim' ? FIELD_NOTE_REWARD : REWARD;
   const token = acquireSponsor(actor);
   try {
     let r = getRecord(actor);
-    if (r.claim?.status === 'confirmed') return r;
+    if (r[kind]?.status === 'confirmed') return r;
     if (!r.completedAt || !r.rewardAddress) throw new MissionError('Complete the mission and verify your Preprod reward wallet first.');
+    if (kind === 'fieldNoteClaim' && (r.claim?.status !== 'confirmed' || !r.blockscholar?.reflection || r.blockscholar.reflection.learning.trim().length < 30 || r.blockscholar.reflection.application.trim().length < 30)) throw new MissionError('Save your field note and confirm the first bounty before claiming 3 test ADA.');
     const wallet = sponsorWallet();
-    if (!r.claim?.signedTx) {
+    if (!r[kind]?.signedTx) {
       const [utxos, params, tip] = await Promise.all([
         chain<Utxo[]>(`/addresses/${wallet.address.to_bech32()}/utxos?count=100`),
         chain<Params>('/epochs/latest/parameters'), chain<{ slot: number }>('/blocks/latest'),
@@ -113,15 +115,15 @@ export async function claimBounty(actor: string) {
         const ins = CSL.Transaction.from_hex(hex).body().inputs();
         for (let i = 0; i < ins.len(); i++) spent.add(`${ins.get(i).transaction_id().to_hex()}:${ins.get(i).index()}`);
       }
-      const built = buildBounty(r.rewardAddress, (utxos || []).filter(u => !spent.has(`${u.tx_hash}:${u.output_index}`)), params, tip.slot, wallet);
+      const built = buildBounty(r.rewardAddress, (utxos || []).filter(u => !spent.has(`${u.tx_hash}:${u.output_index}`)), params, tip.slot, wallet, amount);
       // Reserve the campaign cap, then durably persist the exact signed transaction before broadcasting.
-      reserveClaim(actor);
+      reserveClaim(actor, kind);
       r = withSponsorLease(actor, token, record => {
-        if (record.rewardAddress !== r.rewardAddress || record.claim?.signedTx) throw new MissionError('Your claim changed. Check the saved receipt.', 409);
-        record.claim = { ...record.claim!, ...built, status: 'submitted' };
+        if (record.rewardAddress !== r.rewardAddress || record[kind]?.signedTx) throw new MissionError('Your claim changed. Check the saved receipt.', 409);
+        record[kind] = { ...record[kind]!, ...built, status: 'submitted' };
       });
     }
-    const claim = r.claim!;
+    const claim = r[kind]!;
     const [receipt, tip] = await Promise.all([
       chain<{ hash: string; valid_contract: boolean; block_height: number }>(`/txs/${claim.txHash}`),
       chain<{ height: number; slot: number }>('/blocks/latest'),
@@ -130,8 +132,8 @@ export async function claimBounty(actor: string) {
       if (receipt.hash !== claim.txHash || receipt.valid_contract !== true) throw new MissionError('The saved transaction needs operator review.', 503);
       if (tip && tip.height - receipt.block_height >= 1) {
         const io = await chain<{ outputs: { address: string; amount: { unit: string; quantity: string }[] }[] }>(`/txs/${claim.txHash}/utxos`);
-        if (!io?.outputs.some(o => o.address === r.rewardAddress && o.amount.some(a => a.unit === 'lovelace' && a.quantity === String(REWARD)))) throw new MissionError('The payment receipt did not match the expected bounty.', 503);
-        return withSponsorLease(actor, token, record => { record.claim!.status = 'confirmed'; record.claim!.confirmedAt = Date.now(); });
+        if (!io?.outputs.some(o => o.address === r.rewardAddress && o.amount.some(a => a.unit === 'lovelace' && a.quantity === String(amount)))) throw new MissionError('The payment receipt did not match the expected bounty.', 503);
+        return withSponsorLease(actor, token, record => { record[kind]!.status = 'confirmed'; record[kind]!.confirmedAt = Date.now(); });
       }
       return r;
     }

@@ -6,7 +6,7 @@
 .sm-check-actions,.sm-check-result{display:grid;justify-items:center;gap:14px;margin-top:24px}.strike-mission .sm-check-actions>p,.strike-mission .sm-check-result>p{margin:0}.strike-mission .sm-check-feedback{padding:16px 18px;margin:16px 0 0;border:1px solid #bba0ff70;border-radius:14px;background:#2b1e40;color:#eee5ff;font-size:14px;text-align:center}.sm-knowledge-access{margin-top:24px;padding-top:24px;border-top:1px solid #b7a2df30}.sm-knowledge-access h3{margin:0}.sm-knowledge-access>p{font-size:13px}.sm-connect-section{scroll-margin-top:24px}.sm-action-row{display:flex;justify-content:center;flex-wrap:wrap;gap:12px;margin:20px 0}.sm-knowledge-form>fieldset:last-of-type{margin-bottom:0}.sm-check-actions>.sm-primary{min-width:min(100%,240px)}
 
 .sm-workshop-guide{border:1px solid #bba0ff28;border-radius:14px;padding:6px 18px;margin:18px 0!important;background:#17101f}
-.sm-workshop-guide nav{display:flex;justify-content:center;gap:8px;margin:16px 0}
+.sm-workshop-guide nav{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:16px 0}
 .sm-workshop-guide nav button{min-width:40px;min-height:44px;padding:8px}
 .sm-workshop-guide nav button[aria-pressed=true]{background:#bba0ff;color:#170d2b}
 .sm-workshop-guide figure{margin:20px auto;max-width:360px}
@@ -52,3 +52,14 @@
 .sm-position-paused p:last-child { margin-bottom:0; }
 
 .sm-inline-approval{flex-basis:100%;width:100%;margin:16px 0 0;padding:16px;border:1px solid #bba0ff45;border-radius:12px;background:#bba0ff0a}.sm-inline-approval p{margin:0 0 12px}.sm-setup-connector>button{margin-bottom:4px}.sm-deposit-status .sm-action-row{margin-top:20px}.sm-setup-receipts{margin-top:24px}.sm-setup .sm-setup-step{margin:20px 0;padding:20px 0;border-top:1px solid #b7a2df22}
+
+/* Keep deposit feedback centered over its action, including on wide screens. */
+.strike-mission .sm-deposit-status > .sm-check-feedback {
+  margin: 16px auto 0;
+  text-align: center;
+}
+
+/* Action feedback stays beside its controls instead of covering the page header. */
+.sm-action-feedback { width: 100%; margin: 16px 0; }
+.sm-action-feedback .sm-error, .sm-action-feedback .sm-status { position: static; margin: 0; }
+.sm-action-feedback .sm-error p { margin: 0; }

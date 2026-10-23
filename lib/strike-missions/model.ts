@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 export const MISSION = 'strike-limit-lab-v1';
 export const REWARD = 2_000_000;
+export const FIELD_NOTE_REWARD = 3_000_000;
+export type ClaimKind = 'claim' | 'fieldNoteClaim';
+export type BountyClaim = { id: string; status: 'reserved' | 'submitted' | 'confirmed'; txHash?: string; signedTx?: string; expiresSlot?: number; fee?: number; confirmedAt?: number };
 export const MAX_CLAIMS = 20;
 export const PRACTICE_GRANT = 104_000_000;
 export const DEPOSIT_AMOUNT = '100000000';
@@ -39,7 +42,8 @@ export type MissionRecord = {
   deposit?: PracticeDeposit;
   depositRequest?: { operation: 'quote' | 'build' | 'confirm'; body: string; expires: number; id: string; publicKey: string; walletUtxos?: string[] };
   trade?: { clientId: string; body: string; price: string; size: string; status: 'draft' | 'sent' | 'rejected'; sentAt?: number };
-  claim?: { id: string; status: 'reserved' | 'submitted' | 'confirmed'; txHash?: string; signedTx?: string; expiresSlot?: number; fee?: number; confirmedAt?: number };
+  claim?: BountyClaim;
+  fieldNoteClaim?: BountyClaim;
 };
 
 // Only this server module contains the grading key. Public questions are returned separately.
@@ -99,6 +103,8 @@ export const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('link'), proof: z.object({ key: z.string().max(4096), signature: z.string().max(16384) }).strict() }).strict(),
   z.object({ type: z.literal('observe'), orderId: z.string().regex(/^[1-9][0-9]{0,18}$/) }).strict(),
   z.object({ type: z.literal('verify') }).strict(),
+  z.object({ type: z.literal('field-note-claim') }).strict(),
+  z.object({ type: z.literal('field-note-receipt') }).strict(),
   z.object({ type: z.literal('claim') }).strict(),
   z.object({ type: z.literal('receipt') }).strict(),
 ]);
@@ -110,6 +116,7 @@ export function publicRecord(record: MissionRecord) {
   if (safe.practiceGrant) delete safe.practiceGrant.signedTx;
   if (safe.deposit) delete safe.deposit.signedTx;
   if (safe.claim) delete safe.claim.signedTx;
+  if (safe.fieldNoteClaim) delete safe.fieldNoteClaim.signedTx;
   return safe;
 }
 

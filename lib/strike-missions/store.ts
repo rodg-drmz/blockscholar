@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { MAX_CLAIMS, MISSION, MissionError, workshopRecord, practiceRecord, type MissionRecord } from './model';
+import { MAX_CLAIMS, MISSION, MissionError, workshopRecord, practiceRecord, type MissionRecord, type ClaimKind, REWARD, FIELD_NOTE_REWARD } from './model';
 
 export const dataDir = () => process.env.STRIKE_MISSIONS_DATA_DIR || path.join(process.env.DRMZ_LEARN_DATA_DIR || path.join(process.cwd(), 'data'), 'strike-missions');
 const subject = (actor: string) => createHash('sha256').update(`${MISSION}:${actor}`).digest('hex');
@@ -44,7 +44,7 @@ export function previousPracticeGrant(actor: string, wallet: string, accountId?:
 }
 function safeToSwitch(r: MissionRecord) {
   if (Object.values(r.positions || {}).some(p=>p.entry?.sentAt && !p.completedAt)) throw new MissionError('Finish checking and closing your long or short mission before changing practice accounts.',409);
-  if (r.practiceGrant?.status === 'submitted' || r.deposit && ['submitted','registered'].includes(r.deposit.status) || r.claim && r.claim.status !== 'confirmed') throw new MissionError('A saved payment is still confirming. Finish checking its receipt before switching practice accounts.',409);
+  if (r.practiceGrant?.status === 'submitted' || r.deposit && ['submitted','registered'].includes(r.deposit.status) || r.claim && r.claim.status !== 'confirmed' || r.fieldNoteClaim && r.fieldNoteClaim.status !== 'confirmed') throw new MissionError('A saved payment is still confirming. Finish checking its receipt before switching practice accounts.',409);
   if (!r.completedAt && (r.trade?.status === 'sent' || r.order)) throw new MissionError('Your practice order still needs verification. Cancel and verify it before switching accounts.',409);
 }
 /** Archive instead of deleting: receipts, unique evidence and sponsor limits survive a restart. */
@@ -88,20 +88,21 @@ export function updateRecord(actor: string, fn: (r: MissionRecord, bind: (kind: 
     return record;
   });
 }
-export function reserveClaim(actor: string) {
+export function reserveClaim(actor: string, kind: ClaimKind = 'claim') {
   return database(db => {
     const r = read(db, actor);
     if (!r.completedAt || !r.rewardAddress) throw new MissionError('Complete the mission and verify a Preprod reward wallet first.');
-    if (r.claim) return r;
-    if (history(db,actor).some(row => JSON.parse(String(row.payload)).claim)) throw new MissionError('Your bounty is already saved with a previous practice attempt. Restore it to view the receipt.',409);
+    if (kind === 'fieldNoteClaim' && (r.claim?.status !== 'confirmed' || !r.blockscholar?.reflection || r.blockscholar.reflection.learning.trim().length < 30 || r.blockscholar.reflection.application.trim().length < 30)) throw new MissionError('Save your field note and confirm the first 2-test-ADA bounty before claiming the final 3 test ADA.');
+    if (r[kind]) return r;
+    if (history(db,actor).some(row => JSON.parse(String(row.payload))[kind])) throw new MissionError('Your bounty is already saved with a previous practice attempt. Restore it to view the receipt.',409);
     const rows = [...db.prepare('SELECT payload FROM missions').all(),...history(db)];
     const target=workshopRecord(r);
     if (rows.some(row=>{
       const previous=JSON.parse(String(row.payload)) as MissionRecord, account=workshopRecord(previous);
-      return !!previous.claim && (!!target.accountId && account.accountId===target.accountId || !!target.walletKey && account.walletKey===target.walletKey || !!r.rewardKey && previous.rewardKey===r.rewardKey || !!r.rewardAddress && previous.rewardAddress===r.rewardAddress);
+      return !!previous[kind] && (!!target.accountId && account.accountId===target.accountId || !!target.walletKey && account.walletKey===target.walletKey || !!r.rewardKey && previous.rewardKey===r.rewardKey || !!r.rewardAddress && previous.rewardAddress===r.rewardAddress);
     })) throw new MissionError('This wallet or Strike account already has a bounty claim. Signing in another way does not create a second reward.',409);
-    if (rows.filter(row => (JSON.parse(String(row.payload)) as MissionRecord).claim).length >= MAX_CLAIMS) throw new MissionError('This test campaign has reached its 20-claim limit.', 409);
-    r.claim = { id: randomUUID(), status: 'reserved' }; r.updatedAt = Date.now();
+    if (rows.filter(row => (JSON.parse(String(row.payload)) as MissionRecord)[kind]).length >= MAX_CLAIMS) throw new MissionError('This test campaign has reached its 20-claim limit.', 409);
+    r[kind] = { id: randomUUID(), status: 'reserved' }; r.updatedAt = Date.now();
     db.prepare('INSERT OR REPLACE INTO missions VALUES(?,?)').run(subject(actor), JSON.stringify(r));
     return r;
   });
@@ -111,7 +112,7 @@ export function acquireSponsor(actor: string) {
   return database(db => {
     const other = db.prepare('SELECT actor,payload FROM missions').all().find(row => {
       const r = JSON.parse(String(row.payload)) as MissionRecord;
-      return row.actor !== subject(actor) && r.claim?.signedTx && r.claim.status !== 'confirmed';
+      return row.actor !== subject(actor) && [r.claim, r.fieldNoteClaim].some(claim => claim?.signedTx && claim.status !== 'confirmed');
     });
     if (other) throw new MissionError('Another bounty is confirming. Your completion is saved; retry shortly.', 409);
     const lease = db.prepare('SELECT expires FROM leases WHERE name=?').get('sponsor');
@@ -132,9 +133,9 @@ export function withSponsorLease(actor: string, token: string, fn: (r: MissionRe
 }
 export function releaseSponsor(token: string) { database(db => db.prepare('DELETE FROM leases WHERE name=? AND token=?').run('sponsor', token)); }
 export function paymentOutboxes(): string[] {
-  return database(db => db.prepare('SELECT payload FROM missions').all().flatMap(row => {
+  return database(db => [...db.prepare('SELECT payload FROM missions').all(), ...history(db)].flatMap(row => {
     const r = JSON.parse(String(row.payload)) as MissionRecord;
-    return r.claim?.signedTx ? [r.claim.signedTx] : [];
+    return [r.claim?.signedTx, r.fieldNoteClaim?.signedTx].filter((tx): tx is string => !!tx);
   }));
 }
 /** Separate locks and budget for practice funding; never touches bounty reservations. */
@@ -189,6 +190,8 @@ export function campaignStats() {
     const active = db.prepare('SELECT payload FROM missions').all().map(row => JSON.parse(String(row.payload)) as MissionRecord);
     const records = [...active,...history(db).map(row=>JSON.parse(String(row.payload)) as MissionRecord)];
     const paid = records.filter(r => r.claim?.status === 'confirmed');
+    const bonuses = records.filter(r => r.fieldNoteClaim?.status === 'confirmed');
+    const payments = records.flatMap(r => [{claim:r.claim,amount:REWARD},{claim:r.fieldNoteClaim,amount:FIELD_NOTE_REWARD}]).filter(p => p.claim?.status === 'confirmed');
     return {
       enrolled: active.filter(r => r.blockscholar).length,
       lessonPasses: active.filter(r => r.lessonAt).length,
@@ -197,9 +200,13 @@ export function campaignStats() {
       claimsStarted: records.filter(r => r.claim).length,
       claimsPending: records.filter(r => r.claim && r.claim.status !== 'confirmed').length,
       claimsPaid: paid.length,
+      fieldNoteClaimsStarted: records.filter(r => r.fieldNoteClaim).length,
+      fieldNoteClaimsPending: records.filter(r => r.fieldNoteClaim && r.fieldNoteClaim.status !== 'confirmed').length,
+      fieldNoteClaimsPaid: bonuses.length,
+      fieldNoteUnpaid: records.filter(r => r.completedAt && r.blockscholar?.reflection && r.fieldNoteClaim?.status !== 'confirmed').length,
       verifiedUnpaid: records.filter(r => r.completedAt && r.claim?.status !== 'confirmed').length,
-      feesPaidLovelace: paid.reduce((sum, r) => sum + (r.claim?.fee || 0), 0),
-      payments: paid.filter(r => /^[a-f0-9]{64}$/.test(r.claim?.txHash || '')).sort((a, b) => (b.claim?.confirmedAt || 0) - (a.claim?.confirmedAt || 0)).slice(0, 20).map(r => ({ txHash: r.claim!.txHash!, confirmedAt: r.claim!.confirmedAt || null })),
+      feesPaidLovelace: payments.reduce((sum, p) => sum + (p.claim?.fee || 0), 0),
+      payments: payments.filter(p => /^[a-f0-9]{64}$/.test(p.claim?.txHash || '')).sort((a, b) => (b.claim?.confirmedAt || 0) - (a.claim?.confirmedAt || 0)).slice(0, 40).map(p => ({ txHash: p.claim!.txHash!, confirmedAt: p.claim!.confirmedAt || null, amountLovelace:p.amount })),
     };
   });
 }

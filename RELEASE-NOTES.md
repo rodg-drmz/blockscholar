@@ -4,7 +4,7 @@ This is a fresh, source-only export of DRMZ Blockscholar. No private repository 
 
 Shared domain code preserves the tested program, Strike account/order/deposit verification, persistent progress and payout outbox. The standalone shell and sign-in screen are specific to this release and are validated separately. Login establishes a Blockscholar session; Strike trading still requires explicit wallet authorization. A reload requires reconnecting the in-memory trading key.
 
-The full Spaces engine, Quorum, Oneirium and academic infrastructure remain in the private DRMZ application. The public release links to DRMZ Spaces; it does not claim to include the entire metaverse application.
+The full Spaces engine, Quorum, Oneirium and academic infrastructure remain in the private DRMZ application. The public release is self-contained and does not include navigation to the private DRMZ products.
 
 ## Hosted release — October 23, 2026
 
@@ -42,3 +42,19 @@ No private DRMZ service was redeployed for this release. Existing local and host
 - Receipt checks run before registration retries, so an expired browser signing session or failed registration cannot prevent checking an already settled deposit. Checks resume when returning to the page. Only the existing verified receipt unlocks the workshop.
 - Simplified learner-facing copy and preserved fee/destination review before signing.
 - 82 automated tests and production build/type validation passed. The learner's current deposit still needs its public receipt checked; this UI release does not certify that payment as settled or the full phone bounty flow as complete.
+
+## Complete program and interface polish — October 23, 2026
+
+- Synced the latest Blockscholar program and workshop from local development into this standalone public app. Kept the demo's independent account store, sponsor keys and persistent volume.
+- Illustrated wallet-only welcome, larger heading, separated DRMZ Web3 / Strike branding and one Connect wallet action. Sign out / change wallet is available inside the program; NuFi is excluded. Removed external Learn/Spaces navigation.
+- Three aligned Program steps, centered content, completed markers and a purple highlight on the next unfinished step. Training, My work and Dream Fund unlock after the learning milestones.
+- Reuse the wallet connection from login. Reuse Strike permission within the current tab for the same account and key; clear it on sign-out. Full reload can require a new Strike authorization because trading secrets remain memory-only.
+- Reconcile canceled orders before asking for another signature or retrying cancellation. Keep inline status and errors beside the relevant action.
+- Reuse the mission's verified Preprod wallet for the 2-test-ADA bounty. Added a separate 3-test-ADA field-note claim, guarded by prior mission reward confirmation, saved reflection and account/wallet eligibility. Both payouts use durable outboxes, shared sponsor locking and exact-output confirmation checks.
+- Added automatic field-note receipt checks and an Activity complete display with 5 test ADA total. Dream Fund includes both rewards and their funding capacity.
+- Replaced the workshop guide with nine current mobile-sized screenshots, including deposit review, field note and completion. These are real component captures with illustrative data, not fabricated live transaction receipts.
+- Removed the black matte behind the header Ouroboros through artwork blending.
+- Validation: 100 automated tests passed, TypeScript passed and production build passed. Coverage includes login signature/replay handling, saved progress, wallet handoff, tab-session reuse, order cancellation and reward safeguards.
+- User acceptance on the local implementation confirmed the same-account order/cancel workflow and both 2 + 3 test ADA payouts, followed by Activity complete. Testnet transaction and Strike settlement latency remains external to the UI; long/short execution remains liquidity-dependent.
+
+The Dream Fund's future scholarship and work-based-learning programs are a roadmap. This demo pays testnet learning rewards; it does not promise investment returns or certify mainnet readiness.

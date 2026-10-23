@@ -4,14 +4,29 @@ import { MissionError, type MissionRecord } from './model';
 export const STRIKE_TESTNET_API = 'https://api-v2-testnet.strikefinance.org';
 export const STRIKE_TESTNET_APP = 'https://testnet.strikefinance.org';
 async function request(path: string, query: Record<string, string>) {
-  try {
-    const response = await fetch(`${STRIKE_TESTNET_API}${path}?${new URLSearchParams(query)}`, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000) });
-    if (response.status === 404) throw new MissionError('Strike testnet has not found that account or order yet. Check the wallet and order ID.');
-    if (!response.ok) throw new MissionError('Strike testnet is unavailable. Your saved progress is unchanged.', 503);
-    // Preserve int64 order IDs instead of rounding them through a JS number.
-    const text = await response.text();
-    return JSON.parse(text.replace(/("ID"\s*:\s*)(\d+)(?=\s*[,}])/g, '$1"$2"'));
-  } catch (e) { if (e instanceof MissionError) throw e; throw new MissionError('Could not reach Strike testnet. Please retry.', 503); }
+  // Only these read-only account/order lookups may retry. Never replay a signed action.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(`${STRIKE_TESTNET_API}${path}?${new URLSearchParams(query)}`, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(8_000) });
+      if (attempt === 0 && [502, 503, 504].includes(response.status)) {
+        await response.body?.cancel();
+        await new Promise(resolve => setTimeout(resolve, 250));
+        continue;
+      }
+      if (response.status === 404) throw new MissionError('Strike testnet has not found that account or order yet. Check the wallet and order ID.');
+      if (!response.ok) throw new MissionError('Strike testnet is unavailable. Your saved progress is unchanged.', 503);
+      // Preserve int64 order IDs instead of rounding them through a JS number.
+      const text = await response.text();
+      return JSON.parse(text.replace(/("ID"\s*:\s*)(\d+)(?=\s*[,}])/g, '$1"$2"'));
+    } catch (e) {
+      if (e instanceof MissionError) throw e;
+      if (attempt === 0 && (e instanceof TypeError || e instanceof Error && ['AbortError', 'TimeoutError'].includes(e.name))) {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        continue;
+      }
+      throw new MissionError('Strike’s account or order check is temporarily unavailable. Your saved funding and progress are unchanged. Retry this step; no new deposit is needed.', 503);
+    }
+  }
 }
 const accountSchema = z.object({ account_id: z.string().uuid(), blockchain: z.literal('cardano'), blockchain_address: z.string() });
 const orderSchema = z.object({
