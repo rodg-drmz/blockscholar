@@ -2,7 +2,7 @@
 
 **Learn it. Try it on Strike. Verify the work. Claim a learning bounty.**
 
-[Open the hosted demo](https://blockscholar-production.up.railway.app/learn/blockscholar) · [Strike testnet](https://testnet.strikefinance.org/) · [Architecture](docs/ARCHITECTURE.md) · [Demo walkthrough](docs/DEMO.md)
+[Download the 2½-minute demo video](https://github.com/rodg-drmz/blockscholar/releases/download/demo-2026-10-23/Blockscholar-demo.mp4) · [Open the hosted demo](https://blockscholar-production.up.railway.app/learn/blockscholar) · [Strike testnet](https://testnet.strikefinance.org/) · [Architecture](docs/ARCHITECTURE.md) · [Demo walkthrough](docs/DEMO.md)
 
 Blockscholar is a DRMZ-sponsored learning program that takes a learner from perpetuals fundamentals into an actual Strike testnet workflow. It pairs short lessons and scenarios with verified protocol activity and a funded Cardano Preprod bounty. The Dream Fund makes the sponsor's budget, payments, and remaining capacity visible.
 

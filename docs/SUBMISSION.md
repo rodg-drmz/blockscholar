@@ -15,3 +15,11 @@ https://github.com/rodg-drmz/blockscholar
 ## Website URL
 
 https://blockscholar-production.up.railway.app/learn/blockscholar
+
+## Video Demo URL
+
+https://github.com/rodg-drmz/blockscholar/releases/tag/demo-2026-10-23
+
+Direct MP4 download: https://github.com/rodg-drmz/blockscholar/releases/download/demo-2026-10-23/Blockscholar-demo.mp4
+
+This is an edited narrated walkthrough with labeled illustrative transaction screens and the confirmed local testnet completion result.
