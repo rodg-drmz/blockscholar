@@ -6,7 +6,7 @@ export function StrikeWalletSetup({data, busy, connected, walletControls, fundin
   const ready = !!practice.accountId && practice.wallet?.startsWith('addr_test1');
   const verified = d?.status === 'verified';
   const signed = ['submitted', 'registered', 'verified'].includes(d?.status);
-  const available = funding?.accountId === r.accountId && funding.funded;
+  const available = !!r.accountId && !!funding && funding.accountId === r.accountId && funding.funded;
   return <section className="sm-card sm-setup" aria-label="Wallet funding and deposit">
     <div className="sm-step-label">PRACTICE WALLET / PREPROD</div>
     <h2>{!ready ? 'Connect your practice wallet.' : verified ? 'Your practice account is ready.' : signed ? 'Your deposit is on its way.' : available ? 'Your Strike account is funded.' : 'Fund your practice wallet.'}</h2>

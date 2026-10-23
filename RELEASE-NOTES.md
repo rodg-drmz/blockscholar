@@ -16,6 +16,13 @@ The full Spaces engine, Quorum, Oneirium and academic infrastructure remain in t
 - Live HTTP smoke test: synthetic EVM wallet sign-in, one-time challenge replay rejection, cross-site mutation rejection, lesson score saved and restored as 8/8 after signing out and back in, unearned bounty claim rejected.
 - Hosted email provider accepted a test sign-in email. Inbox delivery and the user's final phone sign-in still need confirmation.
 - Phone-width rendering checked at 390 CSS pixels: no horizontal overflow; exposure calculator updated correctly.
-- New sponsor wallets start unfunded. A real hosted deposit/order/cancel/bounty run is pending sponsor funding and the user's wallet approvals. Prior tests of the private source application are not presented as a completed run on this new host.
+- Sponsor funding is confirmed: 420 Preprod test ADA for practice funding and 50 for bounties. The real hosted phone deposit/order/cancel/bounty run is still pending; prior tests of the private source application are not presented as a completed run on this new host.
+
+## Mission entry fix — October 23, 2026
+
+- Fixed a client-side exception when opening Mission before linking a Strike wallet. Missing account IDs compared equal and caused the screen to read a funding response that did not exist yet.
+- Unknown balances now stay unknown until a response matches a linked account. Applied the same guard to wallet setup.
+- Added React rendering regression tests for signed-out learners, fresh records, readiness saved without a wallet, and linked accounts awaiting funding checks. All 69 tests and the production build/type validation passed.
+- No authentication, progress storage, deposit, order, or bounty payment logic changed.
 
 No private DRMZ service was redeployed for this release. Existing local and hosted records remain where they were. This public demo uses fresh progress records.

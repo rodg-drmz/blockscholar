@@ -225,6 +225,7 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
   }, [grantStatus, depositStatus, data?.record?.apiPublicKey, data?.record?.practiceConnection?.apiPublicKey]);
   const r = data?.record || {}, completed = !!r.completedAt, paid = r.claim?.status === 'confirmed';
   const steps = [!!r.lessonAt, !!r.accountId, !!r.order, completed, paid];
+  const fundingChecked = !!r.accountId && !!funding && funding.accountId === r.accountId;
   const setupReady = r.deposit?.status === 'verified' || r.practiceExistingAt || r.order || r.trade || completed;
   const stage = !r.accountId ? 1 : reviewSetup || !setupReady ? 5 : !r.lessonAt ? 0 : !completed && (!r.order || replaceOrder) ? 2 : !completed ? 3 : 4;
   useEffect(() => { setReplaceOrder(false); }, [r.order?.id, r.accountId, completed]);
@@ -290,10 +291,10 @@ export function StrikeMission({ signIn = null, compact = false, embedded = false
         {!embedded && <><div className="sm-step-label">03 / INSPECT</div><h2>Observe a real order.</h2></>}
         {r.accountId && !completed && <div className="sm-balance-strip">
           <span>Practice balance</span>
-          <strong>{funding?.accountId === r.accountId ? `${Number(funding.availableBalance).toLocaleString(undefined, { maximumFractionDigits: 2 })} test USD` : 'Not checked yet'}</strong>
+          <strong>{fundingChecked ? `${Number(funding.availableBalance).toLocaleString(undefined, { maximumFractionDigits: 2 })} test USD` : 'Not checked yet'}</strong>
           <button type="button" className="bs-text-button" disabled={!!busy} onClick={() => act({ type: 'account-check' }, 'Checking your Strike test balance…')}>Check balance</button>
         </div>}
-        {funding?.accountId === r.accountId && !funding.funded && <p className="sm-notice">Add test trading credits before placing an order. Your test-ADA bounty is separate.</p>}
+        {fundingChecked && !funding.funded && <p className="sm-notice">Add test trading credits before placing an order. Your test-ADA bounty is separate.</p>}
         {data.builderConfigured && !completed && <div className="sm-trade"><p>Review a small ETH-USD buy limit, then place it on Strike testnet. Post-only keeps it from filling immediately.</p>{r.trade && <div className="sm-order-review"><p className="sm-step-label">ETH-USD · BUY LIMIT · POST-ONLY</p><dl><div><dt>Size</dt><dd>{r.trade.size} ETH</dd></div><div><dt>Limit price</dt><dd>{r.trade.price} test USD</dd></div><div><dt>Total exposure</dt><dd>≈ {(Number(r.trade.size) * Number(r.trade.price)).toFixed(2)} test USD</dd></div></dl><p className="sm-small">{r.trade.status === 'draft' ? 'Prepared · not submitted' : r.trade.status === 'rejected' ? 'Rejected or expired · prepare a fresh order' : 'Request sent · check actual order status'}</p></div>}
           {connectionPanel}
           {(!r.trade || r.trade.status === 'rejected') && <button className="sm-primary" disabled={!!busy || !r.apiPublicKey} onClick={() => act({ type: 'order-prepare' }, 'Reading current testnet market rules…')}>Prepare practice order</button>}
