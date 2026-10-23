@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "reviewed": "2026-10-22",
+  "title": "Strike · Perpetuals Practice",
+  "sources": [
+    {
+      "id": "strike",
+      "title": "Strike · official builder reference",
+      "url": "https://github.com/strike-finance/strike-builder-reference"
+    },
+    {
+      "id": "math",
+      "title": "Strike · position and margin calculations",
+      "url": "https://github.com/strike-finance/strike-builder-reference/blob/main/src/math/positionCalculations.ts"
+    },
+    {
+      "id": "orders",
+      "title": "Strike · order permissions",
+      "url": "https://github.com/strike-finance/strike-builder-reference/blob/main/src/api/orders.ts"
+    },
+    {
+      "id": "withdraw",
+      "title": "Strike · withdrawal signatures",
+      "url": "https://github.com/strike-finance/strike-builder-reference/blob/main/src/api/withdraw.ts"
+    },
+    {
+      "id": "funding",
+      "title": "Strike · funding display",
+      "url": "https://github.com/strike-finance/strike-builder-reference/blob/main/src/components/PriceBar.tsx"
+    },
+    {
+      "id": "nft",
+      "title": "Ethereum.org · NFTs",
+      "url": "https://ethereum.org/en/nft/"
+    },
+    {
+      "id": "rwa",
+      "title": "Ethereum.org · real-world assets",
+      "url": "https://ethereum.org/en/real-world-assets/"
+    },
+    {
+      "id": "rights",
+      "title": "ERC-6065 · connecting tokens and property rights",
+      "url": "https://eips.ethereum.org/EIPS/eip-6065"
+    }
+  ],
+  "lessons": [
+    {
+      "id": "mechanics",
+      "title": "A position is exposure",
+      "body": "A perpetual is a contract that tracks a price without a scheduled expiry. A long benefits from a price rise; a short benefits from a price fall. Exposure (notional) is position size × price. Margin is the collateral supporting it. With $100 margin and $1,000 exposure, a 2% adverse move means a $20 price-only loss: 20% of the margin. Try changing those values below. Fees, funding and liquidation are separate.",
+      "source": "math"
+    },
+    {
+      "id": "margin",
+      "title": "Know what backs the position",
+      "body": "Isolated margin assigns collateral to a position. Cross margin uses shared account resources. Maintenance margin and liquidation depend on the market, size and margin settings. Read the current market configuration before treating an estimate as an exact liquidation price. A stop order is an instruction, not a guarantee of the price at which it will fill.",
+      "source": "math"
+    },
+    {
+      "id": "funding",
+      "title": "Read the funding clock",
+      "body": "Funding is a recurring cost or receipt associated with holding a perpetual. A displayed rate needs a period, a sign convention and a position notional before it becomes a useful estimate. Check the current market display. In our scenarios, the period and payment direction are supplied explicitly; they are examples, not live Strike rates.",
+      "source": "funding"
+    },
+    {
+      "id": "execution",
+      "title": "Understand the order",
+      "body": "On Strike, a market order seeks immediate execution against available liquidity. A buy limit sets the highest price you will pay; a sell limit sets the lowest you will accept. A limit can remain unfilled. Post-only prevents immediate taker execution, but a resting order can fill later. Check the actual order status and filled quantity, not just whether the submission was accepted.",
+      "source": "orders"
+    },
+    {
+      "id": "permissions",
+      "title": "Understand what you authorize",
+      "body": "Strike separates your wallet from API-wallet trading authorization. Connecting an API wallet can authorize signed order requests without a new wallet popup for every order. Review the key’s permissions, scope and expiry. Deposits and withdrawals use their own wallet authorization flows. Never give a website or an agent your recovery phrase.",
+      "source": "withdraw"
+    },
+    {
+      "id": "practice",
+      "title": "Cancel an order, not a position",
+      "body": "An order is an instruction; a filled order can create or change a position. Canceling an order removes only its unfilled remainder. It does not undo a fill or close an existing position. Before canceling, inspect the order ID, market, side, size and filled quantity. Afterward, confirm its final status. An accepted cancellation request alone is not evidence that the order is canceled.",
+      "source": "orders"
+    }
+  ],
+  "prep": [
+    {
+      "id": "exposure",
+      "prompt": "A fictional position uses $100 of margin for $1,000 of exposure. A 2% adverse move causes what price-only loss?",
+      "choices": [
+        "$2",
+        "$20",
+        "$200",
+        "No loss until closed"
+      ],
+      "correct": 1,
+      "explanation": "2% of $1,000 is $20, or 20% of the $100 margin. This simplified calculation excludes fees, funding and liquidation.",
+      "source": "math"
+    },
+    {
+      "id": "isolation",
+      "prompt": "A learner wants to separate one practice position’s collateral from other positions. Which setting describes that?",
+      "choices": [
+        "Cross margin",
+        "More leverage",
+        "Isolated margin",
+        "An unlimited API key"
+      ],
+      "correct": 2,
+      "explanation": "Isolated margin assigns collateral to that position; cross margin shares account resources. Neither removes liquidation risk.",
+      "source": "math"
+    },
+    {
+      "id": "funding-cost",
+      "prompt": "The scenario says longs pay 0.01% of notional at the next funding event. A $2,000 long remains open. What is the payment?",
+      "choices": [
+        "$0.20 paid",
+        "$20 paid",
+        "$0.20 received",
+        "$2 received"
+      ],
+      "correct": 0,
+      "explanation": "$2,000 × 0.0001 = $0.20 paid. The rate, period and direction were supplied for this exercise.",
+      "source": "funding"
+    },
+    {
+      "id": "liquidation",
+      "prompt": "An account is approaching its maintenance requirement. What should the learner examine first?",
+      "choices": [
+        "Only the NFT profile picture",
+        "Whether someone predicts a rebound",
+        "A guaranteed payout",
+        "Collateral, open exposure, current margin requirements and costs"
+      ],
+      "correct": 3,
+      "explanation": "Risk depends on the position and account configuration. A confident prediction does not change the maintenance requirement.",
+      "source": "math"
+    },
+    {
+      "id": "slippage",
+      "prompt": "A thin order book shows a price for a small amount. The planned market order is much larger. What can happen?",
+      "choices": [
+        "Every unit must fill at the displayed price",
+        "The order can fill across prices and incur slippage",
+        "The exchange guarantees a profit",
+        "Funding becomes zero"
+      ],
+      "correct": 1,
+      "explanation": "Available depth matters. A market fill can span price levels; a limit order controls price but may not fill.",
+      "source": "orders"
+    },
+    {
+      "id": "agent",
+      "prompt": "A Strike API wallet has permission to submit orders. Must every order trigger another Cardano wallet popup?",
+      "choices": [
+        "Yes, regardless of the API-wallet permissions",
+        "Only when the price rises",
+        "No; authorized API-wallet requests can submit orders without a fresh wallet popup",
+        "No; all orders become anonymous"
+      ],
+      "correct": 2,
+      "explanation": "API-wallet trading requests use their own signatures. Review the authorized scope and permissions; a new Cardano wallet popup is not required for every order.",
+      "source": "orders"
+    },
+    {
+      "id": "withdrawal",
+      "prompt": "A website asks for your recovery phrase to authorize a Strike withdrawal. What should you do?",
+      "choices": [
+        "Reject the request; authorize through your wallet without sharing the phrase",
+        "Share only the first twelve words",
+        "Send it privately to support",
+        "Try with a small deposit first"
+      ],
+      "correct": 0,
+      "explanation": "Wallet authorization does not require disclosing a recovery phrase. Keep it private and verify the site and request before signing.",
+      "source": "withdraw"
+    },
+    {
+      "id": "cancel-remainder",
+      "prompt": "A buy order for 1 ETH has filled 0.3 ETH. You cancel the remaining 0.7 ETH. What happens to the filled portion?",
+      "choices": [
+        "It is automatically reversed",
+        "It is canceled with the remaining quantity",
+        "It disappears after the funding event",
+        "The 0.3 ETH fill remains; canceling does not close its position"
+      ],
+      "correct": 3,
+      "explanation": "Cancellation only stops the unfilled remainder. Any position created by the filled quantity must be managed separately.",
+      "source": "orders"
+    }
+  ],
+  "challenge": [
+    {
+      "id": "size",
+      "prompt": "Your fictional $200 margin supports $2,000 of exposure. The price moves 3% against it. Ignoring fees and liquidation, how much margin does the price loss consume?",
+      "choices": [
+        "$6, or 3%",
+        "$60, or 30%",
+        "$600, or 300%",
+        "$3, or 1.5%"
+      ],
+      "correct": 1,
+      "explanation": "$2,000 × 3% = $60. Relative to $200 margin, that is 30%. Exposure makes the percentage loss on collateral much larger.",
+      "source": "math"
+    },
+    {
+      "id": "cost",
+      "prompt": "A scenario states that a $4,000 long pays 0.02% at one event, plus a $1 execution fee. What is the combined cost?",
+      "choices": [
+        "$81",
+        "$0.80",
+        "$1.80",
+        "It receives $1.80"
+      ],
+      "correct": 2,
+      "explanation": "Funding is $4,000 × 0.0002 = $0.80. Adding the stated $1 fee gives $1.80. These are invented scenario inputs.",
+      "source": "funding"
+    },
+    {
+      "id": "decision",
+      "prompt": "A trader cannot explain cross margin and has no loss budget. An AI predicts a rally. What is the most defensible next action?",
+      "choices": [
+        "Increase leverage",
+        "Treat confidence as evidence",
+        "Share their keys",
+        "Pause, learn the collateral rules and set a loss budget"
+      ],
+      "correct": 3,
+      "explanation": "An AI forecast does not change margin requirements. Understand shared collateral, exposure and possible loss before deciding whether to trade.",
+      "source": "math"
+    },
+    {
+      "id": "partial-fill",
+      "prompt": "On Strike, an ETH-USD buy limit has partially filled. You want to stop further purchases. What does canceling accomplish?",
+      "choices": [
+        "Stops the unfilled remainder; the filled position still needs separate attention",
+        "Reverses every fill at the original price",
+        "Closes the position and guarantees no loss",
+        "Eliminates all funding costs immediately"
+      ],
+      "correct": 0,
+      "explanation": "Inspect Filled and Status, cancel the remaining order, and verify the resulting state. Cancellation does not reverse a trade or automatically close its position.",
+      "source": "orders"
+    }
+  ],
+  "nft": [
+    {
+      "id": "identity",
+      "title": "The token and the image",
+      "body": "An NFT identifies a distinct token. The artwork, metadata, licence and issuer are separate pieces of evidence. A picture alone does not prove collection authenticity or wallet ownership. Use policy/contract identifiers and an independent explorer when reviewing a real asset.",
+      "source": "nft"
+    },
+    {
+      "id": "rights",
+      "title": "What rights travel with it?",
+      "body": "Holding a token does not automatically grant copyright, commercial use, or title to a physical object. Read the terms defining the holder’s rights. Ask who issued them, which entity is responsible and how the rights can be enforced.",
+      "source": "rights"
+    },
+    {
+      "id": "custody",
+      "title": "Follow the physical asset",
+      "body": "For a token linked to a real-world item, identify the custodian, evidence that the asset exists, and the redemption process. Ask what happens if the custodian fails, the item is damaged, or redemption closes. Blockchain history alone cannot establish those off-chain facts.",
+      "source": "rwa"
+    },
+    {
+      "id": "design",
+      "title": "Design a tokenization proposal",
+      "body": "Choose a physical artwork, a membership or an equipment pass. Write what the token represents, what it does not convey, who maintains the record, and how a holder verifies or redeems the claim. Separate a compelling story from evidence.",
+      "source": "rights"
+    }
+  ],
+  "prepPass": 6,
+  "challengePass": 3
+}

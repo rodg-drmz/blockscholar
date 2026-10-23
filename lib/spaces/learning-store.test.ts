@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { readPractice, updatePractice } from './learning-store';
+import { curriculum } from './learning-practice.mjs';
+test('practice records isolate accounts, survive reloads and preserve the best score', t => {
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'drmz-practice-store-')),env={...process.env};
+ process.env.DRMZ_LEARN_DATA_DIR=directory; process.env.DRMZ_LOCAL_DATA_ENCRYPTION_ENABLED='false'; process.env.DRMZ_LOCAL_DATA_REQUIRE_ENCRYPTED='false';
+ t.after(()=>{process.env=env;fs.rmSync(directory,{recursive:true,force:true});});
+ const prep=curriculum.prep.map(q=>q.correct), challenge=curriculum.challenge.map(q=>q.correct);
+ updatePractice('one',{type:'prep',answers:prep}); updatePractice('one',{type:'challenge',answers:challenge});
+ assert.equal(updatePractice('one',{type:'claim'}).award,100); assert.equal(updatePractice('one',{type:'claim'}).award,0);
+ assert.equal(readPractice('one').credits,100);assert.equal(readPractice('two').credits,0);
+ assert.equal(fs.readdirSync(path.join(directory,'spaces-practice')).length,1);
+ const file=path.join(directory,'spaces-practice',fs.readdirSync(path.join(directory,'spaces-practice'))[0]);
+ assert.equal(fs.statSync(file).mode & 0o777,0o600);
+ fs.writeFileSync(file,'corrupt');assert.throws(()=>readPractice('one'),'corruption must not erase a saved award');
+});
